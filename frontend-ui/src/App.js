@@ -1,7 +1,6 @@
 import React from 'react';
 import BayesianNetwork from './BayesianNetwork';
 import RiskCalculator from './RiskCalculator'; // <--- Import it
-import VerificationPanel from './VerificationPanel';
 
 function App() {
     return (
@@ -23,7 +22,7 @@ function App() {
             </p>
             <RiskCalculator />
             <hr style={{ margin: '40px 0', border: '0', borderTop: '1px solid #eee' }} />
-            <VerificationPanel />
+
         </div>
     );
 }

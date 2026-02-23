@@ -3,9 +3,10 @@ from google import genai  # <--- NEW LIBRARY IMPORT
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from dotenv import load_dotenv
 from src.model_logic import CardioBayesianModel
+
 
 # 1. Load API Key
 load_dotenv()
@@ -46,12 +47,24 @@ def read_root():
 def get_graph():
     return bayesian_service.get_structure()
 
-@app.get("/verify")
-def verify_model():
-    """Returns statistical and clinical verification metrics."""
+@app.get("/advanced-network")
+def get_advanced_network_visual():
+    """Returns structure and probabilities for the advanced graph visualization."""
+    if not bayesian_service.model:
+        raise HTTPException(status_code=503, detail="Model not trained")
+    return bayesian_service.get_full_network_data()
+
+@app.post("/verify")
+def verify_model_dynamic(patient_data: Dict[str, Any]):
+    """Returns dynamic statistical and clinical verification metrics based on user input."""
     if not bayesian_service.infer:
         raise HTTPException(status_code=503, detail="Model not trained")
-    return bayesian_service.verify_model_performance()
+
+    try:
+        return bayesian_service.verify_model_performance(patient_data)
+    except Exception as e:
+        print(f"Verification Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/predict")
 def predict_heart_disease(request: PredictionRequest):
@@ -79,10 +92,19 @@ def predict_heart_disease(request: PredictionRequest):
 # --- NEW GENAI ENDPOINT ---
 @app.post("/ask-ai")
 def ask_ai_doctor(request: PredictionRequest):
-
     try:
-        # 1. Construct prompt
-        prompt = "Act as a Cardiologist. Evaluate the CVD risk for a patient with:\n"
+        # 1. Calculate the BN Risk FIRST to ground the AI
+        bn_risk_float = bayesian_service.predict_risk(request.evidence)
+        bn_percentage = bn_risk_float * 100
+        risk_category = "High" if bn_risk_float > 0.5 else "Low"
+
+        # 2. Construct the strict Prompt Grounding
+        prompt = (
+            "You are an AI medical assistant explaining a cardiovascular risk assessment. "
+            "You MUST align your explanation with the provided mathematical model's result.\n\n"
+            "Patient Profile:\n"
+        )
+
         for key, value in request.evidence.items():
             prompt += f"- {key}: {value}\n"
 
@@ -91,23 +113,32 @@ def ask_ai_doctor(request: PredictionRequest):
             for key, value in request.treatments.items():
                 prompt += f"- {key}: {value}\n"
 
-        prompt += "\nTask: Provide a percentage estimate of heart disease risk and a 1-sentence explanation. Be concise."
+        # 3. The Client Requirement: Force Trend Alignment
+        prompt += f"\nCRITICAL INSTRUCTION:\n"
+        prompt += f"Our deterministic Bayesian Network has already calculated this specific patient's risk to be exactly {bn_percentage:.1f}% ({risk_category} Risk) based on our custom clinical dataset.\n"
+        prompt += "RULES:\n"
+        prompt += "1. NO HALLUCINATING NUMBERS: Do not calculate or state your own risk percentages (e.g., do not reference ASCVD scores).\n"
+        prompt += f"2. TREND ALIGNMENT: Your analysis MUST completely align with the {bn_percentage:.1f}% risk figure. If the math model calculates a surprisingly low risk despite traditional risk factors, explain that 'within the context of this specific dataset, these combined factors represent a lower relative probability.' Do not contradict the model.\n"
+        prompt += "3. FORMAT: Keep it brief, professional, and under 3 sentences."
 
-        # 2. Call Gemini API (New Syntax)
-        # Note: We switched to 'gemini-2.0-flash' as 1.5 is being phased out on some endpoints
+        # 4. Call Gemini API
         response = client.models.generate_content(
             model='gemini-2.0-flash',
             contents=prompt
         )
 
-        # 3. Extract text
+        # 5. Extract text
         return {"ai_response": response.text}
 
     except Exception as e:
         print(f"Gemini API Error: {e}")
 
         # Fallback Mock Response
-        risk_level = "High" if bayesian_service.predict_risk(request.evidence) > 0.5 else "Low"
+        try:
+            risk_level = "High" if bayesian_service.predict_risk(request.evidence) > 0.5 else "Low"
+        except:
+            risk_level = "Unknown"
+
         return {
             "ai_response": f"**[AI UNAVAILABLE - Error: {str(e)}]**\nBased on clinical factors, risk appears {risk_level}."
         }

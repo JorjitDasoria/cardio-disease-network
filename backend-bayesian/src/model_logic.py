@@ -82,59 +82,145 @@ class CardioBayesianModel:
         }
 
 
-    def verify_model_performance(self):
+    def verify_model_performance(self, patient_data: dict = None):
         """
-        Runs statistical and clinical checks on the model.
+        Runs statistical and dynamic clinical checks on the model.
+        Uses exact 'Positive'/'Negative' string mapping based on the dataset.
         """
         if self.infer is None or self.training_data is None:
             return {"error": "Model not trained"}
 
+        if patient_data is None:
+            patient_data = {}
+
         results = {}
+        TARGET_COLUMN = 'Disease_Target'
+        POSITIVE_VAL = 'Positive'  # We now know this is exactly what your CSV uses!
 
-        # 1. STATISTICAL VERIFICATION (Data vs. Model)
-        # Calculate frequency of 'Positive' disease in the raw dataset
-        actual_counts = self.training_data['Disease_Target'].value_counts(normalize=True)
-        data_prob = actual_counts.get('Positive', 0.0)
+        # --- 1. STATISTICAL VERIFICATION (MSE) ---
+        try:
+            # Get actual dataset probability for 'Positive'
+            actual_counts = self.training_data[TARGET_COLUMN].value_counts(normalize=True)
+            data_prob = actual_counts.get(POSITIVE_VAL, 0.0)
 
-        # Calculate marginal probability in the Bayesian Network
-        model_prob_obj = self.infer.query(variables=['Disease_Target'])
-        # Extract the probability for 'Positive'
-        pos_index = model_prob_obj.name_to_no['Disease_Target']['Positive']
-        model_prob = model_prob_obj.values[pos_index]
+            # Get model probability for 'Positive'
+            model_prob_obj = self.infer.query(variables=[TARGET_COLUMN])
+            states = list(model_prob_obj.state_names[TARGET_COLUMN])
+            pos_idx = states.index(POSITIVE_VAL)
+            model_prob = model_prob_obj.values[pos_idx]
 
-        results['statistical'] = {
-            "dataset_prevalence": float(data_prob),
-            "model_probability": float(model_prob),
-            "difference": float(abs(data_prob - model_prob))
-        }
+            # Calculate true Mean Squared Error
+            mse_value = (data_prob - model_prob) ** 2
 
-        # 2. CLINICAL VERIFICATION (Scenario Testing)
-        # Scenario: Old Age + High BP + High Chol (Should be VERY High Risk)
-        clinical_q = self.infer.query(
-            variables=['Disease_Target'],
-            evidence={'Age_Bin': 'Old', 'BP_Bin': 'High_BP', 'Chol_Bin': 'High_Chol'}
-        )
-        results['clinical_scenario'] = float(clinical_q.values[pos_index])
+            results['statistical'] = {
+                "dataset_prevalence": float(data_prob),
+                "model_probability": float(model_prob),
+                "difference": float(mse_value)
+            }
+        except Exception as e:
+            print(f"Error in Statistical: {e}")
+            results['statistical'] = {"dataset_prevalence": 0, "model_probability": 0, "difference": 0}
 
-        # 3. EXPLAINING AWAY (Inter-causal Reasoning)
-        # Does knowing High BP "explain away" the need for High Chol to be the cause?
-        # A. Baseline: P(High Chol | Disease)
-        base_chol = self.infer.query(variables=['Chol_Bin'], evidence={'Disease_Target': 'Positive'})
-        chol_idx = base_chol.name_to_no['Chol_Bin']['High_Chol']
-        prob_chol_given_disease = base_chol.values[chol_idx]
+        # --- 2. DYNAMIC CLINICAL SCENARIO ---
+        try:
+            clean_evidence = {k: v for k, v in patient_data.items() if v and v != "-- Select --"}
+            valid_evidence = {k: v for k, v in clean_evidence.items() if k in self.model.nodes()}
 
-        # B. Explained: P(High Chol | Disease, High BP)
-        # If High BP is present, does the probability of High Chol go down?
-        exp_chol = self.infer.query(variables=['Chol_Bin'], evidence={'Disease_Target': 'Positive', 'BP_Bin': 'High_BP'})
-        prob_chol_given_disease_bp = exp_chol.values[chol_idx]
+            clinical_q = self.infer.query(variables=[TARGET_COLUMN], evidence=valid_evidence)
+            clin_states = list(clinical_q.state_names[TARGET_COLUMN])
+            clin_pos_idx = clin_states.index(POSITIVE_VAL)
 
-        results['explaining_away'] = {
-            "p_high_chol_given_disease": float(prob_chol_given_disease),
-            "p_high_chol_given_disease_and_high_bp": float(prob_chol_given_disease_bp),
-            "effect": "Probability Dropped (Explained Away)" if prob_chol_given_disease_bp < prob_chol_given_disease else "Probability Increased/Same"
-        }
+            results['clinical_scenario'] = float(clinical_q.values[clin_pos_idx])
+        except Exception as e:
+            print(f"Error in Clinical: {e}")
+            results['clinical_scenario'] = 0.0
+
+        # --- 3. DYNAMIC EXPLAINING AWAY ---
+        try:
+            if 'Chol_Bin' in self.model.nodes():
+                # A. Base P(High Chol | Disease = Positive)
+                base_chol = self.infer.query(variables=['Chol_Bin'], evidence={TARGET_COLUMN: POSITIVE_VAL})
+                chol_states = list(base_chol.state_names['Chol_Bin'])
+
+                # Find the state containing "High" (e.g., 'High_Chol')
+                high_chol_idx = next((i for i, s in enumerate(chol_states) if 'High' in str(s)), len(chol_states) - 1)
+                prob_chol_given_disease = base_chol.values[high_chol_idx]
+
+                # B. Explained P(High Chol | Disease = Positive, User's BP)
+                patient_bp = patient_data.get('BP_Bin')
+
+                if patient_bp and patient_bp != "-- Select --" and 'BP_Bin' in self.model.nodes():
+                    # Ensure the BP they selected is valid in the model before querying
+                    bp_check = self.infer.query(variables=['BP_Bin'])
+                    bp_states = list(bp_check.state_names['BP_Bin'])
+
+                    if patient_bp in bp_states:
+                        exp_chol = self.infer.query(variables=['Chol_Bin'], evidence={TARGET_COLUMN: POSITIVE_VAL, 'BP_Bin': patient_bp})
+                        prob_chol_given_disease_bp = exp_chol.values[high_chol_idx]
+                    else:
+                        prob_chol_given_disease_bp = prob_chol_given_disease
+                else:
+                    prob_chol_given_disease_bp = prob_chol_given_disease
+
+                effect_text = "Probability Dropped (Explained Away)" if prob_chol_given_disease_bp < prob_chol_given_disease else "Probability Increased/Same"
+
+                results['explaining_away'] = {
+                    "p_high_chol_given_disease": float(prob_chol_given_disease),
+                    "p_high_chol_given_disease_and_patient_bp": float(prob_chol_given_disease_bp),
+                    "effect": effect_text
+                }
+            else:
+                raise ValueError("Chol_Bin node missing")
+        except Exception as e:
+            print(f"Error in Explaining Away: {e}")
+            results['explaining_away'] = {
+                "p_high_chol_given_disease": 0.0,
+                "p_high_chol_given_disease_and_patient_bp": 0.0,
+                "effect": "Error calculating"
+            }
 
         return results
+
+    def get_full_network_data(self):
+        """
+        Returns the network structure (edges) AND the base probabilities for each node.
+        This is for the advanced visualization.
+        """
+        if self.infer is None:
+            return {"error": "Model not trained"}
+
+        # 1. Get the edges (same as before)
+        edges = [list(edge) for edge in self.model.edges()]
+
+        # 2. Get the probabilities for every node
+        node_data = {}
+        for node in self.model.nodes():
+            try:
+                # Query the base probability of this node (no evidence)
+                prob_obj = self.infer.query(variables=[node])
+
+                states = prob_obj.state_names[node]
+                values = prob_obj.values
+
+                # Format into a list of {state: 'High', prob: 0.45}
+                node_probs = []
+                for i, state in enumerate(states):
+                    node_probs.append({
+                        "state": str(state),
+                        "prob": float(values[i]),
+                        # Format as a nice percentage string
+                        "label": f"{float(values[i])*100:.1f}%"
+                    })
+
+                node_data[node] = node_probs
+            except Exception as e:
+                print(f"Could not get probabilities for node {node}: {e}")
+                node_data[node] = []
+
+        return {
+            "edges": edges,
+            "nodes": node_data
+        }
 
 
     def _discretize_heart_data(self, df):

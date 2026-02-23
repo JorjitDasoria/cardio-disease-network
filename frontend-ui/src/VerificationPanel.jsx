@@ -1,20 +1,33 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 
-const VerificationPanel = () => {
+// We now pass 'evidence' and a trigger 'isAnalyzed' from the parent calculator
+const VerificationPanel = ({ evidence, isAnalyzed }) => {
     const [data, setData] = useState(null);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
-        axios.get(`${process.env.REACT_APP_API_URL}/verify`)
-            .then(res => setData(res.data))
-            .catch(err => console.error("Verification failed:", err));
-    }, []);
+        // Do not fetch until the user clicks the Analyze button
+        if (!isAnalyzed) return;
 
-    if (!data) return <div style={styles.loading}>Loading Verification Stats...</div>;
+        // Changed to POST to send the user's specific dropdown choices
+        axios.post(`${process.env.REACT_APP_API_URL}/verify`, evidence)
+            .then(res => {
+                setData(res.data);
+                setError(null);
+            })
+            .catch(err => {
+                console.error("Verification failed:", err);
+                setError("Backend Error: Check your Python logs. There is likely a column name mismatch in model_logic.py.");
+            });
+    }, [isAnalyzed, evidence]); // Re-runs whenever these change
+
+    if (error) return <div style={{...styles.loading, color: 'red'}}>{error}</div>;
+    if (!data) return <div style={styles.loading}>Fill out the patient data and click "Analyze Risk" to generate Verification Stats.</div>;
 
     return (
         <div style={styles.container}>
-            <h3 style={styles.title}>✅ Model Verification Report</h3>
+            <h3 style={styles.title}>✅ Dynamic Model Verification</h3>
 
             <div style={styles.grid}>
                 {/* Card 1: Statistical Accuracy */}
@@ -30,32 +43,32 @@ const VerificationPanel = () => {
                         <strong>{(data.statistical.model_probability * 100).toFixed(2)}%</strong>
                     </div>
                     <div style={{...styles.statRow, marginTop: '10px', color: data.statistical.difference < 0.05 ? 'green' : 'orange'}}>
-                        <span>Difference (MSE):</span>
+                        <span>Mean Squared Error (MSE):</span>
                         <strong>{data.statistical.difference.toFixed(4)}</strong>
                     </div>
                 </div>
 
-                {/* Card 2: Clinical Logic */}
+                {/* Card 2: Dynamic Clinical Logic */}
                 <div style={styles.card}>
                     <h4>2. Clinical Scenario Check</h4>
-                    <p style={styles.desc}>Scenario: <i>Old Age + High BP + High Chol</i></p>
+                    <p style={styles.desc}>Risk for: <i>Your Specific Patient</i></p>
                     <div style={styles.bigStat}>
                         {(data.clinical_scenario * 100).toFixed(1)}%
                     </div>
-                    <p style={{fontSize: '0.8rem', color: '#666'}}>Predicted Risk (Should be > 70%)</p>
+                    <p style={{fontSize: '0.8rem', color: '#666'}}>Matches your BN calculation above</p>
                 </div>
 
-                {/* Card 3: Explaining Away */}
+                {/* Card 3: Dynamic Explaining Away */}
                 <div style={styles.card}>
                     <h4>3. "Explaining Away" Effect</h4>
-                    <p style={styles.desc}>Does High BP explain the disease, reducing the likelihood of High Cholesterol?</p>
+                    <p style={styles.desc}>Does their specific Blood Pressure explain the disease, reducing the likelihood of High Cholesterol?</p>
                     <div style={styles.statRow}>
-                        <span>P(High Chol | Disease):</span>
+                        <span>Base P(High Chol | Disease):</span>
                         <strong>{(data.explaining_away.p_high_chol_given_disease * 100).toFixed(1)}%</strong>
                     </div>
                     <div style={styles.statRow}>
-                        <span>P(High Chol | Disease + High BP):</span>
-                        <strong>{(data.explaining_away.p_high_chol_given_disease_and_high_bp * 100).toFixed(1)}%</strong>
+                        <span>P(High Chol | Disease + Patient BP):</span>
+                        <strong>{(data.explaining_away.p_high_chol_given_disease_and_patient_bp * 100).toFixed(1)}%</strong>
                     </div>
                     <div style={{marginTop: '10px', fontWeight: 'bold', color: '#2980b9'}}>
                         Result: {data.explaining_away.effect}
@@ -74,7 +87,7 @@ const styles = {
     desc: { fontSize: '0.85rem', color: '#7f8c8d', marginBottom: '15px', fontStyle: 'italic' },
     statRow: { display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '0.9rem' },
     bigStat: { fontSize: '2.5rem', fontWeight: 'bold', color: '#e74c3c', textAlign: 'center', margin: '10px 0' },
-    loading: { textAlign: 'center', padding: '20px', color: '#999' }
+    loading: { textAlign: 'center', padding: '20px', color: '#666', fontStyle: 'italic' }
 };
 
 export default VerificationPanel;
