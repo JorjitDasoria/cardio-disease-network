@@ -9,7 +9,9 @@ const RiskCalculator = () => {
 
     // Results
     const [bayesResult, setBayesResult] = useState(null);
-    const [aiResult, setAiResult] = useState(null);
+    const [chatHistory, setChatHistory] = useState([]);
+    const [chatInput, setChatInput] = useState("");
+    const [aiLoading, setAiLoading] = useState(false);
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -31,7 +33,7 @@ const RiskCalculator = () => {
         setLoading(true);
         setError(null);
         setBayesResult(null);
-        setAiResult(null);
+        setChatHistory([]);
 
         const payload = { evidence, treatments };
 
@@ -45,7 +47,7 @@ const RiskCalculator = () => {
             const [bayesRes, aiRes] = await Promise.all([bayesReq, aiReq]);
 
             setBayesResult(bayesRes.data);
-            setAiResult(aiRes.data.ai_response);
+            setChatHistory([{ role: 'model', content: aiRes.data.ai_response }]);
 
         } catch (err) {
             console.error(err);
@@ -58,7 +60,32 @@ const RiskCalculator = () => {
         setEvidence({});
         setTreatments({ statin: 'None', bp_med: 'None', pci: 'None' });
         setBayesResult(null);
-        setAiResult(null);
+        setChatHistory([]);
+    };
+
+    const sendChatMessage = async () => {
+        if (!chatInput.trim()) return;
+
+        const userMsg = { role: 'user', content: chatInput };
+        const updatedHistory = [...chatHistory, userMsg];
+        setChatHistory(updatedHistory);
+        setChatInput("");
+        setAiLoading(true);
+
+        try {
+            const payload = {
+                evidence,
+                treatments,
+                message: chatInput,
+                history: chatHistory // Send the prior conversation context
+            };
+
+            const res = await axios.post(`${process.env.REACT_APP_API_URL}/chat-ai`, payload);
+            setChatHistory(prev => [...prev, { role: 'model', content: res.data.reply }]);
+        } catch (err) {
+            setChatHistory(prev => [...prev, { role: 'model', content: "Sorry, I lost connection to the server." }]);
+        }
+        setAiLoading(false);
     };
 
 
@@ -79,6 +106,11 @@ const RiskCalculator = () => {
         <div style={styles.container}>
 
             <div style={styles.topRow}>
+
+
+
+
+
 
                 {/* --- COLUMN 1: INPUT FORM --- */}
                 <div style={styles.inputPanel}>
@@ -180,6 +212,8 @@ const RiskCalculator = () => {
                     {error && <p style={{ color: 'red', marginTop: '10px' }}>{error}</p>}
                 </div>
 
+
+
                 {/* --- COLUMN 2: BAYESIAN RESULT --- */}
                 <div style={styles.resultPanel}>
                     <h3 style={{color: '#2c3e50'}}>Bayesian Network</h3>
@@ -205,25 +239,97 @@ const RiskCalculator = () => {
                 </div>
 
                 {/* --- COLUMN 3: AI WRAPPER RESULT --- */}
-                <div style={{...styles.resultPanel, borderLeft: '4px solid #8e44ad'}}>
-                    <h3 style={{color: '#8e44ad'}}>AI Doctor (LLM)</h3>
-                    <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Generative "Opinion"</p>
+                <div style={{...styles.resultPanel, borderLeft: '4px solid #8e44ad', display: 'flex', flexDirection: 'column'}}>
+                    <h3 style={{color: '#8e44ad', marginTop: 0}}>Interactive AI Doctor</h3>
+                    <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Ask "What-If" treatment scenarios</p>
 
-                    {aiResult ? (
-                        <div style={{ marginTop: '20px', textAlign: 'left' }}>
-                            <p style={{whiteSpace: 'pre-wrap', lineHeight: '1.5', fontSize: '0.95rem'}}>
-                                {aiResult}
-                            </p>
-                            <div style={{marginTop: '20px', padding: '10px', backgroundColor: '#f0e6f5', borderRadius: '5px', fontSize: '0.8rem', color: '#8e44ad'}}>
-                                <strong>Note:</strong> AI estimates may hallucinate or vary from the mathematical model.
-                            </div>
-                        </div>
-                    ) : (
-                        <div style={styles.placeholder}>Waiting for data...</div>
-                    )}
+                    <div style={{ flex: 1, overflowY: 'auto', marginTop: '10px', padding: '10px', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #eee', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '10px', height: '250px' }}>
+                        {chatHistory.length === 0 ? (
+                            <div style={styles.placeholder}>Waiting for data...</div>
+                        ) : (
+                            chatHistory.map((msg, i) => (
+                                <div key={i} style={{
+                                    padding: '10px', borderRadius: '8px',
+                                    backgroundColor: msg.role === 'user' ? '#8e44ad' : '#f0e6f5',
+                                    color: msg.role === 'user' ? '#fff' : '#2c3e50',
+                                    alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                                    maxWidth: '90%'
+                                }}>
+                                    <p style={{ margin: 0, fontSize: '0.9rem', lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                                </div>
+                            ))
+                        )}
+                        {aiLoading && <div style={{ alignSelf: 'flex-start', color: '#8e44ad', fontSize: '0.85rem', fontStyle: 'italic' }}>Calculating scenarios...</div>}
+                    </div>
+
+                    {/* Chat Input Field */}
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+                        <input
+                            type="text"
+                            value={chatInput}
+                            onChange={(e) => setChatInput(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+                            placeholder="e.g. 'What if I start a High Statin?'"
+                            style={{ flex: 1, padding: '10px', borderRadius: '5px', border: '1px solid #ccc' }}
+                            disabled={chatHistory.length === 0 || aiLoading}
+                        />
+                        <button
+                            onClick={sendChatMessage}
+                            style={{ padding: '10px 15px', backgroundColor: '#8e44ad', color: 'white', border: 'none', borderRadius: '5px', cursor: (chatHistory.length === 0 || aiLoading) ? 'not-allowed' : 'pointer', opacity: (chatHistory.length === 0 || aiLoading) ? 0.6 : 1 }}
+                            disabled={chatHistory.length === 0 || aiLoading}
+                        >
+                            Ask
+                        </button>
+                    </div>
                 </div>
 
+
+
             </div>
+
+            {/* --- NEW ROW: RISK FACTOR BREAKDOWN --- */}
+            {bayesResult && bayesResult.factor_breakdown && bayesResult.factor_breakdown.length > 0 && (
+                <div style={styles.breakdownPanel}>
+                    <h3 style={{ color: '#2c3e50', borderBottom: '1px solid #eee', paddingBottom: '10px', marginTop: 0 }}>
+                        Risk Factor Breakdown
+                    </h3>
+                    <p style={{ fontSize: '0.9rem', color: '#7f8c8d', marginBottom: '15px' }}>
+                        Here is exactly how your specific profile impacted the mathematical baseline:
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+                        {bayesResult.factor_breakdown.map((factor, index) => {
+                            const isDanger = factor.category === 'Danger';
+                            const isProtective = factor.category === 'Protective';
+
+                            // Cap the visual bar width at 100%
+                            const barWidth = Math.min(Math.abs(factor.impact_percentage), 100);
+
+                            // Clean up the variable names
+                            const cleanFeatureName = factor.feature.replace('_Label', '').replace('_Bin', '');
+                            const barColor = isDanger ? '#e74c3c' : isProtective ? '#2ecc71' : '#95a5a6';
+
+                            return (
+                                <div key={index} style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
+                                        <span><strong>{cleanFeatureName}:</strong> {factor.value}</span>
+                                        <span style={{ fontWeight: 'bold', color: barColor }}>
+                                            {factor.impact_percentage > 0 ? '+' : ''}{factor.impact_percentage.toFixed(1)}%
+                                        </span>
+                                    </div>
+                                    <div style={{ width: '100%', backgroundColor: '#ecf0f1', borderRadius: '10px', height: '8px', overflow: 'hidden' }}>
+                                        <div style={{ width: `${barWidth}%`, backgroundColor: barColor, height: '100%', borderRadius: '10px', transition: 'width 0.5s' }}></div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+            {/* --- END RISK FACTOR BREAKDOWN --- */}
+
+
+
+
             <VerificationPanel evidence={evidence} isAnalyzed={true} />
 
         </div>
@@ -250,7 +356,8 @@ const styles = {
     resultPanel: { flex: '1', backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '10px', textAlign: 'center', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
     calcBtn: { width: '100%', padding: '12px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', marginTop: '10px' },
     resetBtn: { background: 'none', border: '1px solid #ccc', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' },
-    placeholder: { marginTop: '100px', color: '#ccc', fontStyle: 'italic' }
+    placeholder: { marginTop: '100px', color: '#ccc', fontStyle: 'italic' },
+    breakdownPanel: { backgroundColor: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', marginTop: '20px' }
 };
 
 export default RiskCalculator;
