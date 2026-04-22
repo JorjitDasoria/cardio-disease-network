@@ -27,6 +27,8 @@ class CardioBayesianModel:
                 self.model = saved_data['model']
                 self.infer = saved_data['infer']
                 self.training_data = saved_data['training_data']
+
+                self.metrics = saved_data.get('metrics', {"accuracy": 0, "sensitivity": 0, "specificity": 0})
             print("Model loaded instantly!")
             return
 
@@ -68,7 +70,11 @@ class CardioBayesianModel:
         print("Fitting model...")
         # Lowered equivalent_sample_size to 1 to reduce mathematical dilution of severe cases
         self.model.fit(formatted_df, estimator=BayesianEstimator, prior_type='BDeu', equivalent_sample_size=1)
+
         self.infer = VariableElimination(self.model)
+
+        print("Calculating baseline clinical metrics (this may take a moment)...")
+        self.metrics = self._calculate_clinical_metrics()
 
         # Save the model so we never have to run this heavy math again
         print("Saving trained model to disk...")
@@ -76,7 +82,8 @@ class CardioBayesianModel:
             pickle.dump({
                 'model': self.model,
                 'infer': self.infer,
-                'training_data': self.training_data
+                'training_data': self.training_data,
+                'metrics': self.metrics  # NEW: Save it to the pickle
             }, f)
 
         print("Model trained and saved successfully.")
@@ -168,14 +175,24 @@ class CardioBayesianModel:
     def _calculate_clinical_metrics(self):
         """Calculates standard medical AI metrics: Accuracy, Sensitivity, Specificity."""
         try:
-            # 1. Drop the answers (Disease_Target) and ask the model to predict them
-            predict_data = self.training_data.drop(columns=['Disease_Target'])
-            predictions = self.model.predict(predict_data)
-
-            # 2. Compare the model's guesses to the real clinical answers
             actuals = self.training_data['Disease_Target'].tolist()
-            preds = predictions['Disease_Target'].tolist()
 
+            try:
+                # 1. Try pgmpy's fast vector prediction first
+                predict_data = self.training_data.drop(columns=['Disease_Target'])
+                predictions = self.model.predict(predict_data)
+                preds = predictions['Disease_Target'].tolist()
+            except Exception as predict_err:
+                print(f"Vector predict failed ({predict_err}), falling back to iterative inference...")
+                # 2. Fallback: Iterate row-by-row (slower, but guaranteed to work)
+                preds = []
+                for _, row in self.training_data.iterrows():
+                    evidence = row.drop('Disease_Target').to_dict()
+                    # Use our own reliable predict method
+                    prob = self.predict_risk(evidence)
+                    preds.append('Positive' if prob and prob >= 0.5 else 'Negative')
+
+            # 3. Calculate confusion matrix
             tp = sum(1 for a, p in zip(actuals, preds) if a == 'Positive' and p == 'Positive')
             tn = sum(1 for a, p in zip(actuals, preds) if a == 'Negative' and p == 'Negative')
             fp = sum(1 for a, p in zip(actuals, preds) if a == 'Negative' and p == 'Positive')
@@ -204,7 +221,7 @@ class CardioBayesianModel:
         POSITIVE_VAL = 'Positive'
 
         # 1. Get the real clinical metrics
-        results['clinical_metrics'] = self._calculate_clinical_metrics()
+        results['clinical_metrics'] = getattr(self, 'metrics', {"accuracy": 0, "sensitivity": 0, "specificity": 0})
 
         # 2. Get the Dynamic Clinical Scenario (Pre-Treatment Baseline)
         try:

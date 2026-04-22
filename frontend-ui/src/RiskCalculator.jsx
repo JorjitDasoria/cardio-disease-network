@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import VerificationPanel from './VerificationPanel';
+import BayesianNetwork from './BayesianNetwork';
 
 
 const RiskCalculator = () => {
@@ -12,7 +13,7 @@ const RiskCalculator = () => {
     const [aiResult, setAiResult] = useState(null); // <-- ADD THIS LINE BACK!
     const [generalAiResult, setGeneralAiResult] = useState(null);
 
-// Chat specific states (if you are keeping the chat feature somewhere!)
+
     const [chatHistory, setChatHistory] = useState([]);
     const [chatInput, setChatInput] = useState("");
     const [aiLoading, setAiLoading] = useState(false);
@@ -33,34 +34,35 @@ const RiskCalculator = () => {
         setTreatments(prev => ({ ...prev, [name]: value }));
     };
 
+
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
     const calculateRisk = async () => {
         setLoading(true);
         setError(null);
 
-        // 1. Clear all previous states
+        // 1. Clear all previous states so the UI resets
         setBayesResult(null);
-        setAiResult(null);        // <-- Added this to clear the middle column
+        setAiResult(null);
         setChatHistory([]);
-        setGeneralAiResult(null); // <-- Clears the right column
+        setGeneralAiResult(null);
 
         const payload = { evidence, treatments };
 
         try {
-            // 2. Fire all three API calls
-            const bayesReq = axios.post(`${process.env.REACT_APP_API_URL}/predict`, payload);
-            const aiReq = axios.post(`${process.env.REACT_APP_API_URL}/ask-ai`, payload);
-            const generalAiReq = axios.post(`${process.env.REACT_APP_API_URL}/ask-ai-general`, payload);
-
-            // Wait for all three to finish
-            const [bayesRes, aiRes, generalRes] = await Promise.all([bayesReq, aiReq, generalAiReq]);
-
-            // 3. SET ALL THE STATES
+            // STEP 1: Get the Math Model (This is fast, no LLM involved)
+            const bayesRes = await axios.post(`${process.env.REACT_APP_API_URL}/predict`, payload);
             setBayesResult(bayesRes.data);
 
-            // <-- THIS IS THE CRITICAL NEW LINE FOR THE MIDDLE COLUMN -->
+            // STEP 2: Ask the Aligned AI (WAIT for it to finish)
+            const aiRes = await axios.post(`${process.env.REACT_APP_API_URL}/ask-ai`, payload);
             setAiResult(aiRes.data.ai_response || aiRes.data.reply);
-
             setChatHistory([{ role: 'model', content: aiRes.data.ai_response }]);
+
+            await delay(2000);
+
+            // STEP 3: Ask the General AI (Only fires AFTER Step 2 is 100% done)
+            const generalRes = await axios.post(`${process.env.REACT_APP_API_URL}/ask-ai-general`, payload);
             setGeneralAiResult(generalRes.data.ai_response || generalRes.data.reply);
 
         } catch (err) {
@@ -106,7 +108,11 @@ const RiskCalculator = () => {
         setAiLoading(false);
     };
 
-
+    const handleKeyPress = (e) => {
+        if (e.key === 'Enter') {
+            sendChatMessage();
+        }
+    };
 
     // 1. Explicitly list all 9 patient data attributes from your form
     const requiredFields = [
@@ -122,6 +128,13 @@ const RiskCalculator = () => {
 
     return (
         <div style={styles.container}>
+
+            <div style={{ marginBottom: '30px' }}>
+                <BayesianNetwork
+                    evidence={evidence}
+                    finalRisk={bayesResult ? bayesResult.disease_probability : null}
+                />
+            </div>
 
             <div style={styles.topRow}>
 
@@ -339,6 +352,59 @@ const RiskCalculator = () => {
             {/* --- END RISK FACTOR BREAKDOWN --- */}
 
 
+            {/* --- NEW ROW: INTERACTIVE AI CHAT (ADDED RIGHT BELOW) --- */}
+            {bayesResult && (
+                <div style={styles.chatContainer}>
+                    <div style={styles.chatHeader}>
+                        <h3 style={{ margin: 0, color: '#fff' }}>Consult AI Doctor</h3>
+                        <span style={{ fontSize: '0.85rem', opacity: 0.8 }}>Ask "what-if" questions about treatments</span>
+                    </div>
+
+                    <div style={styles.chatHistoryBox}>
+                        {chatHistory.length === 0 ? (
+                            <div style={styles.chatPlaceholder}>
+                                Ask how starting a High-Intensity Statin or BP Medication would change this patient's exact risk score.
+                            </div>
+                        ) : (
+                            chatHistory.map((msg, idx) => (
+                                <div key={idx} style={msg.role === 'user' ? styles.userMsg : styles.modelMsg}>
+                                    <strong style={{ display: 'block', marginBottom: '4px', fontSize: '0.8rem', opacity: 0.7 }}>
+                                        {msg.role === 'user' ? 'You' : 'AI Cardiologist'}
+                                    </strong>
+                                    {msg.content}
+                                </div>
+                            ))
+                        )}
+                        {aiLoading && (
+                            <div style={styles.modelMsg}>
+                                <span style={{ fontStyle: 'italic', opacity: 0.7 }}>Analyzing medical data...</span>
+                            </div>
+                        )}
+                    </div>
+
+                    <div style={styles.chatInputRow}>
+                        <input
+                            type="text"
+                            value={chatInput}
+                            onChange={(e) => setChatInput(e.target.value)}
+                            onKeyPress={handleKeyPress}
+                            placeholder="Type your clinical question here..."
+                            style={styles.chatInput}
+                            disabled={aiLoading}
+                        />
+                        <button
+                            onClick={sendChatMessage}
+                            style={{...styles.sendBtn, opacity: aiLoading || !chatInput.trim() ? 0.5 : 1}}
+                            disabled={aiLoading || !chatInput.trim()}
+                        >
+                            Send
+                        </button>
+                    </div>
+                </div>
+            )}
+            {/* --- END CHAT --- */}
+
+
 
 
             <VerificationPanel evidence={evidence} isAnalyzed={true} />
@@ -359,16 +425,108 @@ const FormSelect = ({ label, name, value, onChange, children }) => (
 );
 
 const styles = {
-    container: { display: 'flex',flexDirection: 'column', gap: '30px', marginTop: '30px', height: '600px', fontFamily: 'Arial, sans-serif' },
+    container: { display: 'flex',flexDirection: 'column', gap: '30px', marginTop: '30px', minHeight: '600px', fontFamily: 'Arial, sans-serif' },
     topRow: {display: 'flex', flexDirection: 'row', gap: '20px', alignItems: 'stretch'},
     inputPanel: { flex: '1', backgroundColor: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column' },
     scrollableForm: { flex: '1', overflowY: 'auto', paddingRight: '10px' },
     header: { display: 'flex', justifyContent: 'space-between', marginBottom: '15px' },
     resultPanel: { flex: '1', backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '10px', textAlign: 'center', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
     calcBtn: { width: '100%', padding: '12px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', marginTop: '10px' },
-    resetBtn: { background: 'none', border: '1px solid #ccc', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' },
+    resetBtn: {
+            backgroundColor: '#e74c3c', // Give it a red warning color
+            color: 'white',
+            border: 'none',
+            padding: '8px 16px', // Double the padding so it's clickable
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+            fontWeight: 'bold',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            transition: 'background-color 0.2s'
+        },
     placeholder: { marginTop: '100px', color: '#ccc', fontStyle: 'italic' },
-    breakdownPanel: { backgroundColor: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', marginTop: '20px' }
+    breakdownPanel: { backgroundColor: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', marginTop: '20px' },
+    chatContainer: {
+        backgroundColor: '#fff',
+        borderRadius: '10px',
+        boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+        marginTop: '20px',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        border: '1px solid #e2e8f0'
+    },
+    chatHeader: {
+        backgroundColor: '#8e44ad', // Purple to match the "Aligned AI" theme
+        padding: '15px 20px',
+        color: 'white',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+    },
+    chatHistoryBox: {
+        padding: '20px',
+        height: '250px',
+        overflowY: 'auto',
+        backgroundColor: '#f8f9fa',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px'
+    },
+    chatPlaceholder: {
+        color: '#95a5a6',
+        textAlign: 'center',
+        marginTop: 'auto',
+        marginBottom: 'auto',
+        fontStyle: 'italic',
+        fontSize: '0.95rem'
+    },
+    userMsg: {
+        alignSelf: 'flex-end',
+        backgroundColor: '#3498db',
+        color: 'white',
+        padding: '10px 15px',
+        borderRadius: '15px 15px 0 15px',
+        maxWidth: '75%',
+        fontSize: '0.95rem',
+        lineHeight: '1.4'
+    },
+    modelMsg: {
+        alignSelf: 'flex-start',
+        backgroundColor: '#eaf2f8',
+        color: '#2c3e50',
+        border: '1px solid #d6eaf8',
+        padding: '10px 15px',
+        borderRadius: '15px 15px 15px 0',
+        maxWidth: '75%',
+        fontSize: '0.95rem',
+        lineHeight: '1.4'
+    },
+    chatInputRow: {
+        display: 'flex',
+        padding: '15px',
+        borderTop: '1px solid #eee',
+        backgroundColor: '#fff'
+    },
+    chatInput: {
+        flex: '1',
+        padding: '12px 15px',
+        border: '1px solid #ccc',
+        borderRadius: '25px',
+        fontSize: '1rem',
+        outline: 'none'
+    },
+    sendBtn: {
+        backgroundColor: '#8e44ad',
+        color: 'white',
+        border: 'none',
+        borderRadius: '25px',
+        padding: '0 20px',
+        marginLeft: '10px',
+        cursor: 'pointer',
+        fontWeight: 'bold',
+        transition: 'background-color 0.2s'
+    }
 };
 
 export default RiskCalculator;

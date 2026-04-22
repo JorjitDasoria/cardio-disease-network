@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'; // <-- ADDED useState
 import ReactFlow, {
     Background,
     Controls,
+    MiniMap,
     useNodesState,
     useEdgesState,
     MarkerType
@@ -17,33 +18,45 @@ import ProbabilityNode from './ProbabilityNode';
 const nodeTypes = { probNode: ProbabilityNode };
 
 // --- LAYOUT ENGINE (Auto-arranges nodes) ---
+// --- LAYOUT ENGINE (Auto-arranges nodes) ---
+// Replaced Dagre with a custom compact grid layout!
 const getLayoutedElements = (nodes, edges) => {
-    const dagreGraph = new dagre.graphlib.Graph();
-    dagreGraph.setGraph({ rankdir: 'TB', ranksep: 80, nodesep: 50 });
+    const TARGET_NODE_ID = 'Disease_Target';
+    const X_SPACING = 240; // Horizontal gap between nodes
+    const Y_SPACING = 280; // Vertical gap between rows
+    const MAX_COLS = 5;    // Maximum nodes per row
 
-    dagreGraph.setDefaultEdgeLabel(() => ({}));
+    const targetNode = nodes.find(n => n.id === TARGET_NODE_ID);
+    const childNodes = nodes.filter(n => n.id !== TARGET_NODE_ID);
 
-    nodes.forEach((node) => {
-        dagreGraph.setNode(node.id, { width: 250, height: 150 });
-    });
+    const layoutedNodes = [];
 
-    edges.forEach((edge) => {
-        dagreGraph.setEdge(edge.source, edge.target);
-    });
+    // 1. Place the main Target Node at the top center
+    if (targetNode) {
+        layoutedNodes.push({
+            ...targetNode,
+            position: { x: 0, y: 0 },
+        });
+    }
 
-    dagre.layout(dagreGraph);
+    // 2. Place all the evidence nodes in a grid below it
+    childNodes.forEach((node, index) => {
+        const row = Math.floor(index / MAX_COLS);
+        const col = index % MAX_COLS;
 
-    const layoutedNodes = nodes.map((node) => {
-        const nodeWithPosition = dagreGraph.node(node.id);
-        return {
+        // Calculate how many items are in this specific row to center it perfectly
+        const itemsInRow = Math.min(MAX_COLS, childNodes.length - (row * MAX_COLS));
+
+        // Math to center the row underneath the parent node
+        const offset = col - (itemsInRow - 1) / 2;
+
+        layoutedNodes.push({
             ...node,
-            targetPosition: 'top',
-            sourcePosition: 'bottom',
             position: {
-                x: nodeWithPosition.x - 125,
-                y: nodeWithPosition.y - 75,
+                x: offset * X_SPACING,
+                y: Y_SPACING + (row * Y_SPACING)
             },
-        };
+        });
     });
 
     return { nodes: layoutedNodes, edges };
@@ -104,53 +117,77 @@ const cardTextStyle = { margin: 0, fontSize: '0.9rem', color: '#7f8c8d', lineHei
 
 
 // --- MAIN COMPONENT ---
-const BayesianNetwork = () => {
+const BayesianNetwork = ({ evidence = {}, finalRisk = null }) => {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-
-    // 3. NEW STATE: Track whether the API is still loading
     const [isLoading, setIsLoading] = useState(true);
 
+    // NEW: Store the raw mathematical baseline from the API
+    const [baseNetworkData, setBaseNetworkData] = useState(null);
+
+    // 1. Fetch baseline data ONLY ONCE on mount
     useEffect(() => {
-        setIsLoading(true); // Ensure it's true when starting the fetch
-
+        setIsLoading(true);
         axios.get(`${process.env.REACT_APP_API_URL}/advanced-network`)
-            .then((response) => {
-                const rawData = response.data;
-
-                const initialNodes = Object.keys(rawData.nodes).map((nodeId) => ({
-                    id: nodeId,
-                    type: 'probNode',
-                    data: {
-                        label: nodeId.replace('_', ' '),
-                        probs: rawData.nodes[nodeId]
-                    },
-                    position: { x: 0, y: 0 },
-                }));
-
-                const initialEdges = rawData.edges.map((edge, index) => ({
-                    id: `e${index}`,
-                    source: edge[0],
-                    target: edge[1],
-                    type: 'smoothstep',
-                    markerEnd: { type: MarkerType.ArrowClosed },
-                    style: { stroke: '#b1b1b7', strokeWidth: 1.5 }
-                }));
-
-                const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-                    initialNodes,
-                    initialEdges
-                );
-
-                setNodes(layoutedNodes);
-                setEdges(layoutedEdges);
-            })
+            .then((response) => setBaseNetworkData(response.data))
             .catch((error) => console.error("Error fetching network:", error))
-            .finally(() => {
-                // 4. CRITICAL: Turn off the loading screen regardless of success or failure
-                setIsLoading(false);
-            });
-    }, [setNodes, setEdges]);
+            .finally(() => setIsLoading(false));
+    }, []);
+
+    // 2. Recalculate nodes whenever EVIDENCE or FINAL RISK changes
+    useEffect(() => {
+        if (!baseNetworkData) return;
+
+        const dynamicNodes = Object.keys(baseNetworkData.nodes).map((nodeId) => {
+            let nodeProbs = [...baseNetworkData.nodes[nodeId]];
+            let isObserved = false;
+            let observedState = null;
+
+            // OVERRIDE A: The final disease calculation
+            if (nodeId === 'Disease_Target' && finalRisk !== null) {
+                isObserved = true;
+                nodeProbs = [
+                    { state: 'Negative', prob: 1 - finalRisk, label: `${((1 - finalRisk) * 100).toFixed(1)}%` },
+                    { state: 'Positive', prob: finalRisk, label: `${(finalRisk * 100).toFixed(1)}%` }
+                ];
+            }
+
+            // OVERRIDE B: Clamp evidence to 100% if the user selected it
+            if (evidence[nodeId]) {
+                isObserved = true;
+                observedState = evidence[nodeId];
+                nodeProbs = nodeProbs.map(p => ({
+                    ...p,
+                    prob: p.state === observedState ? 1.0 : 0.0,
+                    label: p.state === observedState ? '100%' : '0%'
+                }));
+            }
+
+            return {
+                id: nodeId,
+                type: 'probNode',
+                data: {
+                    label: nodeId.replace('_', ' '),
+                    probs: nodeProbs,
+                    isObserved,     // Flags the node to turn green
+                    observedState   // Tells the node which bar to highlight
+                },
+                position: { x: 0, y: 0 },
+            };
+        });
+
+        // Generate edges and lay them out
+        const dynamicEdges = baseNetworkData.edges.map((edge, index) => ({
+            id: `e${index}`, source: edge[0], target: edge[1],
+            type: 'straight', markerEnd: { type: MarkerType.ArrowClosed },
+            style: { stroke: '#b1b1b7', strokeWidth: 1.5 }
+        }));
+
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(dynamicNodes, dynamicEdges);
+        setNodes(layoutedNodes);
+        setEdges(layoutedEdges);
+
+    }, [baseNetworkData, evidence, finalRisk, setNodes, setEdges]); // Reruns when props change!
 
     return (
         <div style={{ height: '800px', border: '1px solid #ddd', borderRadius: '12px', background: '#f8f9fa', overflow: 'hidden' }}>
@@ -169,6 +206,12 @@ const BayesianNetwork = () => {
                 >
                     <Background color="#ccc" gap={16} />
                     <Controls />
+                    <MiniMap
+                        nodeColor={(node) => '#3498db'}
+                        nodeStrokeWidth={3}
+                        zoomable
+                        pannable
+                    />
                 </ReactFlow>
             )}
         </div>

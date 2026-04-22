@@ -2,7 +2,7 @@
 // 1. ADD THIS IMPORT AT THE TOP
 import ReactFlowPlaceholder from './graph_static.png';
 import RiskCalculator from './RiskCalculator';
-import BayesianNetwork from './BayesianNetwork';
+
 
 function App() {
     return (
@@ -33,7 +33,7 @@ function App() {
 
             {/* 1. The Dynamic Graph Visualization */}
             {/* THIS IS THE COMPONENT WE NEED TO UPGRADE NEXT */}
-            <BayesianNetwork />
+
 
             <hr style={{ margin: '50px 0', border: '0', borderTop: '1px solid #e2e8f0' }} />
 

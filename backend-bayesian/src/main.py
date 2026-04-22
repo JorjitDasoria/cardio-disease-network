@@ -169,7 +169,7 @@ def ask_ai_doctor(request: PredictionRequest):
 
         # 6. Call Gemini API
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-2.5-flash',
             contents=prompt
         )
 
@@ -229,7 +229,7 @@ def chat_ai_doctor(request: ChatRequest):
 
         # E. Create the stateful chat session and attach the tool
         chat = client.chats.create(
-            model='gemini-2.0-flash',
+            model='gemini-2.5-flash',
             config=types.GenerateContentConfig(
                 system_instruction=sys_instruct,
                 tools=[simulate_treatment], # <-- Handing the tool to Gemini!
@@ -253,6 +253,21 @@ def chat_ai_doctor(request: ChatRequest):
 def ask_ai_general(request: PredictionRequest):
     """An independent AI that only sees patient attributes, not the BN math."""
     try:
+        #Calculate the Bayesian Network's score so the AI can audit it
+        base_probability = bayesian_service.predict_risk(request.evidence)
+        final_probability = float(base_probability)
+
+        if request.treatments:
+            t = request.treatments
+            if t.get('statin') == 'High': final_probability *= 0.57
+            elif t.get('statin') == 'Moderate': final_probability *= 0.70
+            if t.get('bp_med') == 'Dual': final_probability *= 0.43
+            elif t.get('bp_med') == 'Monotherapy': final_probability *= 0.65
+            if t.get('pci') == 'Yes': final_probability *= 0.80
+
+        bn_percentage = final_probability * 100
+
+        #Build the prompt
         prompt = (
             "You are an AI medical assistant evaluating cardiovascular risk. "
             "Analyze the following patient profile and provide a general clinical assessment.\n\n"
@@ -267,15 +282,15 @@ def ask_ai_general(request: PredictionRequest):
             for key, value in request.treatments.items():
                 prompt += f"- {key}: {value}\n"
 
+        #RULES: Force the comparison and the flag
         prompt += "\nRULES:\n"
-        prompt += "1. Give a clinical assessment of the likelihood that this patient CURRENTLY has coronary artery disease (CAD), based on standard diagnostic criteria for their symptoms and clinical test results.\n"
-        prompt += "2. You do not have access to the app's underlying math model. Make your best independent clinical diagnostic judgment.\n"
-        prompt += "3. Provide a specific estimated PERCENTAGE representing the probability that this patient CURRENTLY has established heart disease right now, based on medical literature for these attributes.\n"
+        prompt += "1. Give a clinical assessment of the likelihood that this patient CURRENTLY has coronary artery disease (CAD), based on standard diagnostic criteria.\n"
+        prompt += "2. Provide a specific estimated PERCENTAGE representing the probability based on standard medical literature.\n"
+        prompt += f"3. CONTRADICTION FLAG: The underlying mathematical Bayesian Network calculated this patient's risk as {bn_percentage:.1f}%. If your independent clinical estimate differs significantly from this mathematical calculation, you MUST start your response with '**⚠️ Clinical Contradiction Flagged:**' and briefly explain that the mathematical model is likely skewed by sparse data on this highly specific combination of symptoms.\n"
         prompt += "4. FORMAT: Keep it professional, concise, and under 4 sentences.\n"
 
-        # Call Gemini API - UPGRADED TO PRO MODEL
         response = client.models.generate_content(
-            model = "gemini-3.1-pro-preview", # <-- Changed from 'flash' to 'pro' for heavy reasoning
+            model = "gemini-2.5-flash",
             contents=prompt
         )
 
