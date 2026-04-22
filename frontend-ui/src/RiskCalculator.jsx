@@ -9,6 +9,10 @@ const RiskCalculator = () => {
 
     // Results
     const [bayesResult, setBayesResult] = useState(null);
+    const [aiResult, setAiResult] = useState(null); // <-- ADD THIS LINE BACK!
+    const [generalAiResult, setGeneralAiResult] = useState(null);
+
+// Chat specific states (if you are keeping the chat feature somewhere!)
     const [chatHistory, setChatHistory] = useState([]);
     const [chatInput, setChatInput] = useState("");
     const [aiLoading, setAiLoading] = useState(false);
@@ -32,22 +36,32 @@ const RiskCalculator = () => {
     const calculateRisk = async () => {
         setLoading(true);
         setError(null);
+
+        // 1. Clear all previous states
         setBayesResult(null);
+        setAiResult(null);        // <-- Added this to clear the middle column
         setChatHistory([]);
+        setGeneralAiResult(null); // <-- Clears the right column
 
         const payload = { evidence, treatments };
 
         try {
-            // 1. Call Bayesian Model
+            // 2. Fire all three API calls
             const bayesReq = axios.post(`${process.env.REACT_APP_API_URL}/predict`, payload);
-
-            // 2. Call AI Wrapper (Run in parallel!)
             const aiReq = axios.post(`${process.env.REACT_APP_API_URL}/ask-ai`, payload);
+            const generalAiReq = axios.post(`${process.env.REACT_APP_API_URL}/ask-ai-general`, payload);
 
-            const [bayesRes, aiRes] = await Promise.all([bayesReq, aiReq]);
+            // Wait for all three to finish
+            const [bayesRes, aiRes, generalRes] = await Promise.all([bayesReq, aiReq, generalAiReq]);
 
+            // 3. SET ALL THE STATES
             setBayesResult(bayesRes.data);
+
+            // <-- THIS IS THE CRITICAL NEW LINE FOR THE MIDDLE COLUMN -->
+            setAiResult(aiRes.data.ai_response || aiRes.data.reply);
+
             setChatHistory([{ role: 'model', content: aiRes.data.ai_response }]);
+            setGeneralAiResult(generalRes.data.ai_response || generalRes.data.reply);
 
         } catch (err) {
             console.error(err);
@@ -59,8 +73,12 @@ const RiskCalculator = () => {
     const handleReset = () => {
         setEvidence({});
         setTreatments({ statin: 'None', bp_med: 'None', pci: 'None' });
+
+        // Clear everything
         setBayesResult(null);
+        setAiResult(null);        // <-- Added this here too
         setChatHistory([]);
+        setGeneralAiResult(null);
     };
 
     const sendChatMessage = async () => {
@@ -213,75 +231,68 @@ const RiskCalculator = () => {
                 </div>
 
 
+                {/* --- COLUMN 2: BAYESIAN NETWORK + ALIGNED AI --- */}
+                <div style={{ ...styles.resultPanel, display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-                {/* --- COLUMN 2: BAYESIAN RESULT --- */}
-                <div style={styles.resultPanel}>
-                    <h3 style={{color: '#2c3e50'}}>Bayesian Network</h3>
-                    <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Deterministic Math Model</p>
+                    {/* Top Half: The Math */}
+                    <div style={{ borderBottom: '2px solid #eee', paddingBottom: '20px' }}>
+                        <h3 style={{color: '#2c3e50', margin: 0}}>Bayesian Network</h3>
+                        <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Deterministic Math Model</p>
 
-                    {bayesResult ? (
-                        <div style={{ textAlign: 'center', marginTop: '20px' }}>
-                            <h1 style={{ fontSize: '3.5rem', margin: '10px 0', color: bayesResult.disease_probability > 0.5 ? '#e74c3c' : '#2ecc71' }}>
-                                {(bayesResult.disease_probability * 100).toFixed(1)}%
-                            </h1>
-                            <div style={{
-                                padding: '8px 16px', borderRadius: '20px', display: 'inline-block',
-                                backgroundColor: bayesResult.disease_probability > 0.5 ? '#e74c3c' : '#2ecc71',
-                                color: 'white', fontWeight: 'bold'
-                            }}>
-                                {bayesResult.disease_probability > 0.5 ? "High Risk" : "Low Risk"}
+                        {bayesResult ? (
+                            <div style={{ textAlign: 'center', marginTop: '10px' }}>
+                                <h1 style={{ fontSize: '3.5rem', margin: '10px 0', color: bayesResult.disease_probability > 0.5 ? '#e74c3c' : '#2ecc71' }}>
+                                    {(bayesResult.disease_probability * 100).toFixed(1)}%
+                                </h1>
+                                <div style={{
+                                    padding: '8px 16px', borderRadius: '20px', display: 'inline-block',
+                                    backgroundColor: bayesResult.disease_probability > 0.5 ? '#e74c3c' : '#2ecc71',
+                                    color: 'white', fontWeight: 'bold'
+                                }}>
+                                    {bayesResult.disease_probability > 0.5 ? "High Risk" : "Low Risk"}
+                                </div>
                             </div>
-                            <p style={{marginTop: '20px', fontSize: '0.9rem'}}>Calculated purely from dataset probabilities.</p>
+                        ) : (
+                            <div style={styles.placeholder}>Waiting for data...</div>
+                        )}
+                    </div>
+
+                    {/* Bottom Half: The Aligned AI */}
+                    <div>
+                        <h3 style={{color: '#8e44ad', margin: 0}}>Aligned AI Explainer</h3>
+                        <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Grounded strictly in the BN Math</p>
+
+                        {aiResult ? (
+                            <div style={{ marginTop: '10px', textAlign: 'left' }}>
+                                <p style={{whiteSpace: 'pre-wrap', lineHeight: '1.5', fontSize: '0.95rem', color: '#333'}}>
+                                    {aiResult}
+                                </p>
+                            </div>
+                        ) : (
+                            <div style={{...styles.placeholder, marginTop: '20px'}}>Waiting for data...</div>
+                        )}
+                    </div>
+                </div>
+
+                {/* --- COLUMN 3: GENERAL AI OPINION --- */}
+                <div style={{...styles.resultPanel, borderLeft: '4px solid #2980b9'}}>
+                    <h3 style={{color: '#2980b9', margin: 0}}>General AI Opinion</h3>
+                    <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Independent Clinical Judgment (No BN Access)</p>
+
+                    {generalAiResult ? (
+                        <div style={{ marginTop: '20px', textAlign: 'left' }}>
+                            <p style={{whiteSpace: 'pre-wrap', lineHeight: '1.5', fontSize: '0.95rem', color: '#333'}}>
+                                {generalAiResult}
+                            </p>
+                            <div style={{marginTop: '20px', padding: '10px', backgroundColor: '#eaf2f8', borderRadius: '5px', fontSize: '0.8rem', color: '#2980b9'}}>
+                                <strong>Note:</strong> This assessment is generated purely from standard LLM training data and may differ from the statistical dataset model.
+                            </div>
                         </div>
                     ) : (
                         <div style={styles.placeholder}>Waiting for data...</div>
                     )}
                 </div>
 
-                {/* --- COLUMN 3: AI WRAPPER RESULT --- */}
-                <div style={{...styles.resultPanel, borderLeft: '4px solid #8e44ad', display: 'flex', flexDirection: 'column'}}>
-                    <h3 style={{color: '#8e44ad', marginTop: 0}}>Interactive AI Doctor</h3>
-                    <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Ask "What-If" treatment scenarios</p>
-
-                    <div style={{ flex: 1, overflowY: 'auto', marginTop: '10px', padding: '10px', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #eee', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '10px', height: '250px' }}>
-                        {chatHistory.length === 0 ? (
-                            <div style={styles.placeholder}>Waiting for data...</div>
-                        ) : (
-                            chatHistory.map((msg, i) => (
-                                <div key={i} style={{
-                                    padding: '10px', borderRadius: '8px',
-                                    backgroundColor: msg.role === 'user' ? '#8e44ad' : '#f0e6f5',
-                                    color: msg.role === 'user' ? '#fff' : '#2c3e50',
-                                    alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                                    maxWidth: '90%'
-                                }}>
-                                    <p style={{ margin: 0, fontSize: '0.9rem', lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>{msg.content}</p>
-                                </div>
-                            ))
-                        )}
-                        {aiLoading && <div style={{ alignSelf: 'flex-start', color: '#8e44ad', fontSize: '0.85rem', fontStyle: 'italic' }}>Calculating scenarios...</div>}
-                    </div>
-
-                    {/* Chat Input Field */}
-                    <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                        <input
-                            type="text"
-                            value={chatInput}
-                            onChange={(e) => setChatInput(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
-                            placeholder="e.g. 'What if I start a High Statin?'"
-                            style={{ flex: 1, padding: '10px', borderRadius: '5px', border: '1px solid #ccc' }}
-                            disabled={chatHistory.length === 0 || aiLoading}
-                        />
-                        <button
-                            onClick={sendChatMessage}
-                            style={{ padding: '10px 15px', backgroundColor: '#8e44ad', color: 'white', border: 'none', borderRadius: '5px', cursor: (chatHistory.length === 0 || aiLoading) ? 'not-allowed' : 'pointer', opacity: (chatHistory.length === 0 || aiLoading) ? 0.6 : 1 }}
-                            disabled={chatHistory.length === 0 || aiLoading}
-                        >
-                            Ask
-                        </button>
-                    </div>
-                </div>
 
 
 
