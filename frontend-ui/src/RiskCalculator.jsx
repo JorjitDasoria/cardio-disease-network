@@ -4,6 +4,9 @@ import VerificationPanel from './VerificationPanel';
 import BayesianNetwork from './BayesianNetwork';
 import ReactFlowPlaceholder from './graph_static.png'; // Make sure this matches your filename!
 
+import { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
+
 
 const RiskCalculator = () => {
     const [evidence, setEvidence] = useState({});
@@ -84,6 +87,56 @@ const RiskCalculator = () => {
         setGeneralAiResult(null);
     };
 
+    // --- NEW PDF EXPORT FUNCTION ---
+    const [isExporting, setIsExporting] = useState(false);
+
+    const exportToPDF = async () => {
+        setIsExporting(true);
+        try {
+            // Create a new A4 PDF
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pdfWidth = pdf.internal.pageSize.getWidth() - 20; // 10mm margin on left and right
+
+            // A helper function to take a picture of a specific ID and drop it on the PDF
+            const addPanelToPdf = async (elementId, yPosition) => {
+                const element = document.getElementById(elementId);
+                if (!element) return yPosition;
+
+                const canvas = await html2canvas(element, {
+                    scale: 2,
+                    useCORS: true,
+                    backgroundColor: '#ffffff'
+                });
+
+                const imgData = canvas.toDataURL('image/png');
+                const imgProps = pdf.getImageProperties(imgData);
+                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+                pdf.addImage(imgData, 'PNG', 10, yPosition, pdfWidth, pdfHeight);
+                return yPosition + pdfHeight + 10; // Returns the starting Y position for the NEXT image
+            };
+
+            // --- PAGE 1: Interactive Engine & Breakdown ---
+            pdf.setFontSize(16);
+            pdf.text("Patient Risk Report - Visual Analysis", 10, 15);
+            let nextY = await addPanelToPdf('pdf-interactive-graph', 25);
+            await addPanelToPdf('pdf-risk-breakdown', nextY);
+
+            // --- PAGE 2: Patient Data, AI Results & Static Baseline ---
+            pdf.addPage();
+            pdf.setFontSize(16);
+            pdf.text("Patient Risk Report - Clinical Details", 10, 15);
+            nextY = await addPanelToPdf('pdf-top-row', 25);
+            await addPanelToPdf('pdf-static-graph', nextY);
+
+            pdf.save(`Patient_Risk_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+        } catch (err) {
+            console.error("PDF Export failed:", err);
+            alert("Failed to export PDF. Please try again.");
+        }
+        setIsExporting(false);
+    };
+
     const sendChatMessage = async () => {
         if (!chatInput.trim()) return;
 
@@ -130,194 +183,258 @@ const RiskCalculator = () => {
     return (
         <div style={styles.container}>
 
-            {/* --- REPLACED SINGLE GRAPH WITH SIDE-BY-SIDE SHOWCASE --- */}
-            <div style={{
-                display: 'flex',
-                flexDirection: 'row',
-                gap: '30px',
-                marginBottom: '40px',
-                alignItems: 'stretch' // Forces both boxes to be the exact same height
-            }}>
+            {/* --- 1. THE PDF WRAPPER STARTS HERE --- */}
+            {/* Everything inside this specific div gets "photographed" for the PDF */}
+            <div id="report-container" style={{ padding: '15px', backgroundColor: '#fff', borderRadius: '12px' }}>
 
-                {/* LEFT COLUMN: Static Reference Image */}
+                {/* --- REPLACED SINGLE GRAPH WITH SIDE-BY-SIDE SHOWCASE --- */}
                 <div style={{
-                    flex: '1', // Takes up 50% of the space
-                    backgroundColor: '#fff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '12px',
-                    padding: '20px',
-                    boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
                     display: 'flex',
-                    flexDirection: 'column'
+                    flexDirection: 'row',
+                    gap: '30px',
+                    marginBottom: '40px',
+                    alignItems: 'stretch' // Forces both boxes to be the exact same height
                 }}>
-                    <div style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', marginBottom: '15px' }}>
-                        <h3 style={{ color: '#2c3e50', margin: '0', fontSize: '1.2rem' }}>Static Dataset Baseline</h3>
-                        <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>Original DAG Layout (Dagre)</span>
+
+                    {/* LEFT COLUMN: Static Reference Image */}
+                    <div id="pdf-static-graph" style={{
+                        flex: '1', // Takes up 50% of the space
+                        backgroundColor: '#fff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '12px',
+                        padding: '20px',
+                        boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                        display: 'flex',
+                        flexDirection: 'column'
+                    }}>
+                        <div style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', marginBottom: '15px' }}>
+                            <h3 style={{ color: '#2c3e50', margin: '0', fontSize: '1.2rem' }}>Static Dataset Baseline</h3>
+                            <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>Original DAG Layout (Dagre)</span>
+                        </div>
+
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8f9fa', borderRadius: '8px', overflow: 'hidden' }}>
+                            <img
+                                src={ReactFlowPlaceholder}
+                                alt="Static Bayesian Network"
+                                style={{ maxWidth: '100%', maxHeight: '600px', objectFit: 'contain' }}
+                            />
+                        </div>
                     </div>
 
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8f9fa', borderRadius: '8px', overflow: 'hidden' }}>
-                        <img
-                            src={ReactFlowPlaceholder}
-                            alt="Static Bayesian Network"
-                            style={{ maxWidth: '100%', maxHeight: '600px', objectFit: 'contain' }}
-                        />
+                    {/* RIGHT COLUMN: Dynamic React Flow Graph */}
+                    <div id="pdf-interactive-graph" style={{
+                        flex: '1', // Takes up the other 50% of the space
+                        backgroundColor: '#fff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '12px',
+                        padding: '20px',
+                        boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                        display: 'flex',
+                        flexDirection: 'column'
+                    }}>
+                        <div style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', marginBottom: '15px' }}>
+                            <h3 style={{ color: '#3498db', margin: '0', fontSize: '1.2rem' }}>Interactive Engine</h3>
+                            <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>Real-time probability updates</span>
+                        </div>
+
+                        <div style={{ flex: 1, position: 'relative' }}>
+
+                            {/* THIS IS YOUR DYNAMIC GRAPH */}
+                            <BayesianNetwork
+                                evidence={evidence}
+                                finalRisk={bayesResult ? bayesResult.disease_probability : null}
+                            />
+
+                        </div>
                     </div>
+
                 </div>
+                {/* --- END SIDE-BY-SIDE SHOWCASE --- */}
 
-                {/* RIGHT COLUMN: Dynamic React Flow Graph */}
-                <div style={{
-                    flex: '1', // Takes up the other 50% of the space
-                    backgroundColor: '#fff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '12px',
-                    padding: '20px',
-                    boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-                    display: 'flex',
-                    flexDirection: 'column'
-                }}>
-                    <div style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', marginBottom: '15px' }}>
-                        <h3 style={{ color: '#3498db', margin: '0', fontSize: '1.2rem' }}>Interactive Engine</h3>
-                        <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>Real-time probability updates</span>
+
+                {/* --- THE REST OF YOUR APP REMAINS UNCHANGED BELOW --- */}
+                <div id="pdf-top-row" style={styles.topRow}>
+
+                    {/* --- COLUMN 1: INPUT FORM --- */}
+                    <div style={styles.inputPanel}>
+                        <div style={styles.header}>
+                            <h2>Patient Data</h2>
+
+                            {/* --- 2. THE NEW EXPORT BUTTON IS PLACED HERE --- */}
+                            <div>
+                                <button onClick={handleReset} style={styles.resetBtn}>Reset</button>
+
+                                {/* Only show the Export button if a result exists */}
+                                {bayesResult && (
+                                    <button
+                                        onClick={exportToPDF}
+                                        style={{
+                                            ...styles.resetBtn,
+                                            backgroundColor: '#27ae60',
+                                            color: 'white',
+                                            marginLeft: '10px',
+                                            border: 'none',
+                                            opacity: isExporting ? 0.6 : 1
+                                        }}
+                                        disabled={isExporting}
+                                    >
+                                        {isExporting ? "Generating..." : "📄 Export PDF"}
+                                    </button>
+                                )}
+                            </div>
+                            {/* ----------------------------------------------- */}
+
+                        </div>
+
+                        <div style={styles.scrollableForm}>
+                            {/* 1. AGE: Based on bins [0, 45, 60, 120] */}
+                            <FormSelect label="Age Group" name="Age_Bin" value={evidence.Age_Bin} onChange={handleEvidenceChange}>
+                                <option value="Young">Young (&lt; 45 years)</option>
+                                <option value="Middle">Middle (45 - 60 years)</option>
+                                <option value="Old">Old (&gt; 60 years)</option>
+                            </FormSelect>
+
+                            <FormSelect label="Sex" name="Sex_Label" value={evidence.Sex_Label} onChange={handleEvidenceChange}>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                            </FormSelect>
+
+                            {/* 2. BLOOD PRESSURE: Based on bins [0, 120, 140, 300] */}
+                            <FormSelect label="Blood Pressure (Resting)" name="BP_Bin" value={evidence.BP_Bin} onChange={handleEvidenceChange}>
+                                <option value="Normal">Normal (&lt; 120 mmHg)</option>
+                                <option value="Elevated">Elevated (120 - 139 mmHg)</option>
+                                <option value="High_BP">High (≥ 140 mmHg)</option>
+                            </FormSelect>
+
+                            {/* 3. CHOLESTEROL: Based on bins [0, 200, 240, 600] */}
+                            <FormSelect label="Cholesterol" name="Chol_Bin" value={evidence.Chol_Bin} onChange={handleEvidenceChange}>
+                                <option value="Desirable">Desirable (&lt; 200 mg/dL)</option>
+                                <option value="Borderline">Borderline (200 - 239 mg/dL)</option>
+                                <option value="High_Chol">High (≥ 240 mg/dL)</option>
+                            </FormSelect>
+
+                            {/* 4. HEART RATE: Based on bins [0, 110, 150, 250] */}
+                            <FormSelect label="Max Heart Rate" name="HR_Bin" value={evidence.HR_Bin} onChange={handleEvidenceChange}>
+                                <option value="Low_Rate">Low (&lt; 110 bpm)</option>
+                                <option value="Normal_Rate">Normal (110 - 150 bpm)</option>
+                                <option value="High_Rate">High (&gt; 150 bpm)</option>
+                            </FormSelect>
+
+                            <FormSelect label="Chest Pain Type" name="CP_Label" value={evidence.CP_Label} onChange={handleEvidenceChange}>
+                                <option value="Typical_Angina">Typical Angina</option>
+                                <option value="Atypical_Angina">Atypical Angina</option>
+                                <option value="Non_Anginal">Non-Anginal Pain</option>
+                                <option value="Asymptomatic">Asymptomatic</option>
+                            </FormSelect>
+
+                            {/* 5. FASTING BLOOD SUGAR: Based on > 120 threshold */}
+                            <FormSelect label="Fasting Blood Sugar" name="FBS_Label" value={evidence.FBS_Label} onChange={handleEvidenceChange}>
+                                <option value="Normal_Sugar">Normal (&lt; 120 mg/dL)</option>
+                                <option value="High_Sugar">High (&gt; 120 mg/dL)</option>
+                            </FormSelect>
+
+                            <FormSelect label="Blocked Vessels (Fluoroscopy)" name="CA_Label" value={evidence.CA_Label} onChange={handleEvidenceChange}>
+                                <option value="0.0_Vessels">0 Vessels</option>
+                                <option value="1.0_Vessels">1 Vessel</option>
+                                <option value="2.0_Vessels">2 Vessels</option>
+                                <option value="3.0_Vessels">3 Vessels</option>
+                            </FormSelect>
+
+                            <FormSelect label="Thalassemia" name="Thal_Label" value={evidence.Thal_Label} onChange={handleEvidenceChange}>
+                                <option value="Normal">Normal</option>
+                                <option value="Fixed_Defect">Fixed Defect (Permanent)</option>
+                                <option value="Reversible_Defect">Reversible Defect (Blood Flow Issue)</option>
+                            </FormSelect>
+
+                            <h4 style={{marginTop: '15px', borderTop: '1px solid #eee', paddingTop: '10px'}}>Interventions</h4>
+
+                            <FormSelect label="Statin Therapy" name="statin" value={treatments.statin} onChange={handleTreatmentChange}>
+                                <option value="None">None</option>
+                                <option value="Moderate">Moderate Intensity (30% reduction)</option>
+                                <option value="High">High Intensity (50% reduction)</option>
+                            </FormSelect>
+
+                            <FormSelect label="BP Medication" name="bp_med" value={treatments.bp_med} onChange={handleTreatmentChange}>
+                                <option value="None">None</option>
+                                <option value="Monotherapy">Monotherapy (Standard)</option>
+                                <option value="Dual">Dual-Combination (Aggressive)</option>
+                            </FormSelect>
+                            <FormSelect label="History of PCI / Stents" name="pci" value={treatments.pci} onChange={handleTreatmentChange}>
+                                <option value="None">No History</option>
+                                <option value="Yes">Yes (Previous Procedure)</option>
+                            </FormSelect>
+                        </div>
+
+                        <button
+                            onClick={calculateRisk}
+                            style={{
+                                ...styles.calcBtn,
+                                opacity: (loading || !isFormValid) ? 0.6 : 1,
+                                cursor: (loading || !isFormValid) ? 'not-allowed' : 'pointer'
+                            }}
+                            disabled={loading || !isFormValid}
+                        >
+                            {loading ? "Analyzing..." : (isFormValid ? "Analyze Risk" : "Fill all patient data")}
+                        </button>
+                        {error && <p style={{ color: 'red', marginTop: '10px' }}>{error}</p>}
                     </div>
 
-                    <div style={{ flex: 1, position: 'relative' }}>
 
-                        {/* THIS IS YOUR DYNAMIC GRAPH */}
-                        <BayesianNetwork
-                            evidence={evidence}
-                            finalRisk={bayesResult ? bayesResult.disease_probability : null}
-                        />
+                    {/* --- COLUMN 2: BAYESIAN NETWORK + ALIGNED AI --- */}
+                    <div style={{ ...styles.resultPanel, display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-                    </div>
-                </div>
+                        {/* Top Half: The Math */}
+                        <div style={{ borderBottom: '2px solid #eee', paddingBottom: '20px' }}>
+                            <h3 style={{color: '#2c3e50', margin: 0}}>Bayesian Network</h3>
+                            <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Deterministic Math Model</p>
 
-            </div>
-            {/* --- END SIDE-BY-SIDE SHOWCASE --- */}
+                            {bayesResult ? (
+                                <div style={{ textAlign: 'center', marginTop: '10px' }}>
+                                    <h1 style={{ fontSize: '3.5rem', margin: '10px 0', color: bayesResult.disease_probability > 0.5 ? '#e74c3c' : '#2ecc71' }}>
+                                        {(bayesResult.disease_probability * 100).toFixed(1)}%
+                                    </h1>
+                                    <div style={{
+                                        padding: '8px 16px', borderRadius: '20px', display: 'inline-block',
+                                        backgroundColor: bayesResult.disease_probability > 0.5 ? '#e74c3c' : '#2ecc71',
+                                        color: 'white', fontWeight: 'bold'
+                                    }}>
+                                        {bayesResult.disease_probability > 0.5 ? "High Risk" : "Low Risk"}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div style={styles.placeholder}>Waiting for data...</div>
+                            )}
+                        </div>
 
+                        {/* Bottom Half: The Aligned AI */}
+                        <div>
+                            <h3 style={{color: '#8e44ad', margin: 0}}>Aligned AI Explainer</h3>
+                            <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Grounded strictly in the BN Math</p>
 
-            {/* --- THE REST OF YOUR APP REMAINS UNCHANGED BELOW --- */}
-            <div style={styles.topRow}>
-
-                {/* --- COLUMN 1: INPUT FORM --- */}
-                <div style={styles.inputPanel}>
-                    <div style={styles.header}>
-                        <h2>Patient Data</h2>
-                        <button onClick={handleReset} style={styles.resetBtn}>Reset</button>
-                    </div>
-
-                    <div style={styles.scrollableForm}>
-                        {/* 1. AGE: Based on bins [0, 45, 60, 120] */}
-                        <FormSelect label="Age Group" name="Age_Bin" value={evidence.Age_Bin} onChange={handleEvidenceChange}>
-                            <option value="Young">Young (&lt; 45 years)</option>
-                            <option value="Middle">Middle (45 - 60 years)</option>
-                            <option value="Old">Old (&gt; 60 years)</option>
-                        </FormSelect>
-
-                        <FormSelect label="Sex" name="Sex_Label" value={evidence.Sex_Label} onChange={handleEvidenceChange}>
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                        </FormSelect>
-
-                        {/* 2. BLOOD PRESSURE: Based on bins [0, 120, 140, 300] */}
-                        <FormSelect label="Blood Pressure (Resting)" name="BP_Bin" value={evidence.BP_Bin} onChange={handleEvidenceChange}>
-                            <option value="Normal">Normal (&lt; 120 mmHg)</option>
-                            <option value="Elevated">Elevated (120 - 139 mmHg)</option>
-                            <option value="High_BP">High (≥ 140 mmHg)</option>
-                        </FormSelect>
-
-                        {/* 3. CHOLESTEROL: Based on bins [0, 200, 240, 600] */}
-                        <FormSelect label="Cholesterol" name="Chol_Bin" value={evidence.Chol_Bin} onChange={handleEvidenceChange}>
-                            <option value="Desirable">Desirable (&lt; 200 mg/dL)</option>
-                            <option value="Borderline">Borderline (200 - 239 mg/dL)</option>
-                            <option value="High_Chol">High (≥ 240 mg/dL)</option>
-                        </FormSelect>
-
-                        {/* 4. HEART RATE: Based on bins [0, 110, 150, 250] */}
-                        <FormSelect label="Max Heart Rate" name="HR_Bin" value={evidence.HR_Bin} onChange={handleEvidenceChange}>
-                            <option value="Low_Rate">Low (&lt; 110 bpm)</option>
-                            <option value="Normal_Rate">Normal (110 - 150 bpm)</option>
-                            <option value="High_Rate">High (&gt; 150 bpm)</option>
-                        </FormSelect>
-
-                        <FormSelect label="Chest Pain Type" name="CP_Label" value={evidence.CP_Label} onChange={handleEvidenceChange}>
-                            <option value="Typical_Angina">Typical Angina</option>
-                            <option value="Atypical_Angina">Atypical Angina</option>
-                            <option value="Non_Anginal">Non-Anginal Pain</option>
-                            <option value="Asymptomatic">Asymptomatic</option>
-                        </FormSelect>
-
-                        {/* 5. FASTING BLOOD SUGAR: Based on > 120 threshold */}
-                        <FormSelect label="Fasting Blood Sugar" name="FBS_Label" value={evidence.FBS_Label} onChange={handleEvidenceChange}>
-                            <option value="Normal_Sugar">Normal (&lt; 120 mg/dL)</option>
-                            <option value="High_Sugar">High (&gt; 120 mg/dL)</option>
-                        </FormSelect>
-
-                        <FormSelect label="Blocked Vessels (Fluoroscopy)" name="CA_Label" value={evidence.CA_Label} onChange={handleEvidenceChange}>
-                            <option value="0.0_Vessels">0 Vessels</option>
-                            <option value="1.0_Vessels">1 Vessel</option>
-                            <option value="2.0_Vessels">2 Vessels</option>
-                            <option value="3.0_Vessels">3 Vessels</option>
-                        </FormSelect>
-
-                        <FormSelect label="Thalassemia" name="Thal_Label" value={evidence.Thal_Label} onChange={handleEvidenceChange}>
-                            <option value="Normal">Normal</option>
-                            <option value="Fixed_Defect">Fixed Defect (Permanent)</option>
-                            <option value="Reversible_Defect">Reversible Defect (Blood Flow Issue)</option>
-                        </FormSelect>
-
-                        <h4 style={{marginTop: '15px', borderTop: '1px solid #eee', paddingTop: '10px'}}>Interventions</h4>
-
-                        <FormSelect label="Statin Therapy" name="statin" value={treatments.statin} onChange={handleTreatmentChange}>
-                            <option value="None">None</option>
-                            <option value="Moderate">Moderate Intensity (30% reduction)</option>
-                            <option value="High">High Intensity (50% reduction)</option>
-                        </FormSelect>
-
-                        <FormSelect label="BP Medication" name="bp_med" value={treatments.bp_med} onChange={handleTreatmentChange}>
-                            <option value="None">None</option>
-                            <option value="Monotherapy">Monotherapy (Standard)</option>
-                            <option value="Dual">Dual-Combination (Aggressive)</option>
-                        </FormSelect>
-                        <FormSelect label="History of PCI / Stents" name="pci" value={treatments.pci} onChange={handleTreatmentChange}>
-                            <option value="None">No History</option>
-                            <option value="Yes">Yes (Previous Procedure)</option>
-                        </FormSelect>
+                            {aiResult ? (
+                                <div style={{ marginTop: '10px', textAlign: 'left' }}>
+                                    <p style={{whiteSpace: 'pre-wrap', lineHeight: '1.5', fontSize: '0.95rem', color: '#333'}}>
+                                        {aiResult}
+                                    </p>
+                                </div>
+                            ) : (
+                                <div style={{...styles.placeholder, marginTop: '20px'}}>Waiting for data...</div>
+                            )}
+                        </div>
                     </div>
 
-                    <button
-                        onClick={calculateRisk}
-                        style={{
-                            ...styles.calcBtn,
-                            opacity: (loading || !isFormValid) ? 0.6 : 1,
-                            cursor: (loading || !isFormValid) ? 'not-allowed' : 'pointer'
-                        }}
-                        disabled={loading || !isFormValid}
-                    >
-                        {loading ? "Analyzing..." : (isFormValid ? "Analyze Risk" : "Fill all patient data")}
-                    </button>
-                    {error && <p style={{ color: 'red', marginTop: '10px' }}>{error}</p>}
-                </div>
+                    {/* --- COLUMN 3: GENERAL AI OPINION --- */}
+                    <div style={{...styles.resultPanel, borderLeft: '4px solid #2980b9'}}>
+                        <h3 style={{color: '#2980b9', margin: 0}}>General AI Opinion</h3>
+                        <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Independent Clinical Judgment (No BN Access)</p>
 
-
-                {/* --- COLUMN 2: BAYESIAN NETWORK + ALIGNED AI --- */}
-                <div style={{ ...styles.resultPanel, display: 'flex', flexDirection: 'column', gap: '20px' }}>
-
-                    {/* Top Half: The Math */}
-                    <div style={{ borderBottom: '2px solid #eee', paddingBottom: '20px' }}>
-                        <h3 style={{color: '#2c3e50', margin: 0}}>Bayesian Network</h3>
-                        <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Deterministic Math Model</p>
-
-                        {bayesResult ? (
-                            <div style={{ textAlign: 'center', marginTop: '10px' }}>
-                                <h1 style={{ fontSize: '3.5rem', margin: '10px 0', color: bayesResult.disease_probability > 0.5 ? '#e74c3c' : '#2ecc71' }}>
-                                    {(bayesResult.disease_probability * 100).toFixed(1)}%
-                                </h1>
-                                <div style={{
-                                    padding: '8px 16px', borderRadius: '20px', display: 'inline-block',
-                                    backgroundColor: bayesResult.disease_probability > 0.5 ? '#e74c3c' : '#2ecc71',
-                                    color: 'white', fontWeight: 'bold'
-                                }}>
-                                    {bayesResult.disease_probability > 0.5 ? "High Risk" : "Low Risk"}
+                        {generalAiResult ? (
+                            <div style={{ marginTop: '20px', textAlign: 'left' }}>
+                                <p style={{whiteSpace: 'pre-wrap', lineHeight: '1.5', fontSize: '0.95rem', color: '#333'}}>
+                                    {generalAiResult}
+                                </p>
+                                <div style={{marginTop: '20px', padding: '10px', backgroundColor: '#eaf2f8', borderRadius: '5px', fontSize: '0.8rem', color: '#2980b9'}}>
+                                    <strong>Note:</strong> This assessment is generated purely from standard LLM training data and may differ from the statistical dataset model.
                                 </div>
                             </div>
                         ) : (
@@ -325,86 +442,53 @@ const RiskCalculator = () => {
                         )}
                     </div>
 
-                    {/* Bottom Half: The Aligned AI */}
-                    <div>
-                        <h3 style={{color: '#8e44ad', margin: 0}}>Aligned AI Explainer</h3>
-                        <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Grounded strictly in the BN Math</p>
-
-                        {aiResult ? (
-                            <div style={{ marginTop: '10px', textAlign: 'left' }}>
-                                <p style={{whiteSpace: 'pre-wrap', lineHeight: '1.5', fontSize: '0.95rem', color: '#333'}}>
-                                    {aiResult}
-                                </p>
-                            </div>
-                        ) : (
-                            <div style={{...styles.placeholder, marginTop: '20px'}}>Waiting for data...</div>
-                        )}
-                    </div>
                 </div>
 
-                {/* --- COLUMN 3: GENERAL AI OPINION --- */}
-                <div style={{...styles.resultPanel, borderLeft: '4px solid #2980b9'}}>
-                    <h3 style={{color: '#2980b9', margin: 0}}>General AI Opinion</h3>
-                    <p style={{fontSize: '0.8rem', color: '#7f8c8d'}}>Independent Clinical Judgment (No BN Access)</p>
+                {/* --- NEW ROW: RISK FACTOR BREAKDOWN --- */}
+                {bayesResult && bayesResult.factor_breakdown && bayesResult.factor_breakdown.length > 0 && (
+                    <div id="pdf-risk-breakdown" style={styles.breakdownPanel}>
+                        <h3 style={{ color: '#2c3e50', borderBottom: '1px solid #eee', paddingBottom: '10px', marginTop: 0 }}>
+                            Risk Factor Breakdown
+                        </h3>
+                        <p style={{ fontSize: '0.9rem', color: '#7f8c8d', marginBottom: '15px' }}>
+                            Here is exactly how your specific profile impacted the mathematical baseline:
+                        </p>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+                            {bayesResult.factor_breakdown.map((factor, index) => {
+                                const isDanger = factor.category === 'Danger';
+                                const isProtective = factor.category === 'Protective';
 
-                    {generalAiResult ? (
-                        <div style={{ marginTop: '20px', textAlign: 'left' }}>
-                            <p style={{whiteSpace: 'pre-wrap', lineHeight: '1.5', fontSize: '0.95rem', color: '#333'}}>
-                                {generalAiResult}
-                            </p>
-                            <div style={{marginTop: '20px', padding: '10px', backgroundColor: '#eaf2f8', borderRadius: '5px', fontSize: '0.8rem', color: '#2980b9'}}>
-                                <strong>Note:</strong> This assessment is generated purely from standard LLM training data and may differ from the statistical dataset model.
-                            </div>
+                                // Cap the visual bar width at 100%
+                                const barWidth = Math.min(Math.abs(factor.impact_percentage), 100);
+
+                                // Clean up the variable names
+                                const cleanFeatureName = factor.feature.replace('_Label', '').replace('_Bin', '');
+                                const barColor = isDanger ? '#e74c3c' : isProtective ? '#2ecc71' : '#95a5a6';
+
+                                return (
+                                    <div key={index} style={{ display: 'flex', flexDirection: 'column' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
+                                            <span><strong>{cleanFeatureName}:</strong> {factor.value}</span>
+                                            <span style={{ fontWeight: 'bold', color: barColor }}>
+                                            {factor.impact_percentage > 0 ? '+' : ''}{factor.impact_percentage.toFixed(1)}%
+                                        </span>
+                                        </div>
+                                        <div style={{ width: '100%', backgroundColor: '#ecf0f1', borderRadius: '10px', height: '8px', overflow: 'hidden' }}>
+                                            <div style={{ width: `${barWidth}%`, backgroundColor: barColor, height: '100%', borderRadius: '10px', transition: 'width 0.5s' }}></div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
-                    ) : (
-                        <div style={styles.placeholder}>Waiting for data...</div>
-                    )}
-                </div>
+                    </div>
+                )}
+                {/* --- END RISK FACTOR BREAKDOWN --- */}
 
+                {/* --- 3. THE PDF WRAPPER ENDS HERE --- */}
             </div>
 
-            {/* --- NEW ROW: RISK FACTOR BREAKDOWN --- */}
-            {bayesResult && bayesResult.factor_breakdown && bayesResult.factor_breakdown.length > 0 && (
-                <div style={styles.breakdownPanel}>
-                    <h3 style={{ color: '#2c3e50', borderBottom: '1px solid #eee', paddingBottom: '10px', marginTop: 0 }}>
-                        Risk Factor Breakdown
-                    </h3>
-                    <p style={{ fontSize: '0.9rem', color: '#7f8c8d', marginBottom: '15px' }}>
-                        Here is exactly how your specific profile impacted the mathematical baseline:
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
-                        {bayesResult.factor_breakdown.map((factor, index) => {
-                            const isDanger = factor.category === 'Danger';
-                            const isProtective = factor.category === 'Protective';
 
-                            // Cap the visual bar width at 100%
-                            const barWidth = Math.min(Math.abs(factor.impact_percentage), 100);
-
-                            // Clean up the variable names
-                            const cleanFeatureName = factor.feature.replace('_Label', '').replace('_Bin', '');
-                            const barColor = isDanger ? '#e74c3c' : isProtective ? '#2ecc71' : '#95a5a6';
-
-                            return (
-                                <div key={index} style={{ display: 'flex', flexDirection: 'column' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                                        <span><strong>{cleanFeatureName}:</strong> {factor.value}</span>
-                                        <span style={{ fontWeight: 'bold', color: barColor }}>
-                                        {factor.impact_percentage > 0 ? '+' : ''}{factor.impact_percentage.toFixed(1)}%
-                                    </span>
-                                    </div>
-                                    <div style={{ width: '100%', backgroundColor: '#ecf0f1', borderRadius: '10px', height: '8px', overflow: 'hidden' }}>
-                                        <div style={{ width: `${barWidth}%`, backgroundColor: barColor, height: '100%', borderRadius: '10px', transition: 'width 0.5s' }}></div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
-            {/* --- END RISK FACTOR BREAKDOWN --- */}
-
-
-            {/* --- NEW ROW: INTERACTIVE AI CHAT --- */}
+            {/* --- NEW ROW: INTERACTIVE AI CHAT (Not included in PDF) --- */}
             {bayesResult && (
                 <div style={styles.chatContainer}>
                     <div style={styles.chatHeader}>
