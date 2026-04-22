@@ -1,43 +1,28 @@
-// Results
-// 1. ADD THIS IMPORT AT THE TOP
-import ReactFlowPlaceholder from './graph_static.png';
+import React from 'react';
 import RiskCalculator from './RiskCalculator';
-
 
 function App() {
     return (
-        <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif', maxWidth: '1200px', margin: '0 auto' }}>
+        <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif', maxWidth: '90%', margin: '0 auto' }}>
 
             {/* --- UPDATED HEADER SECTION --- */}
-            <div style={{ textAlign: 'center', margin: '40px 0 30px 0' }}>
-                <h1 style={{ color: '#2c3e50', fontSize: '2.8rem', fontWeight: '800', margin: '0 0 12px 0', letterSpacing: '-0.5px' }}>
+            <div style={{ textAlign: 'center', margin: '50px 0 40px 0', padding: '0 20px' }}>
+                <h1 style={{
+                    fontSize: '3.2rem',
+                    fontWeight: '900',
+                    background: 'linear-gradient(90deg, #2c3e50, #3498db)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    margin: '0 0 15px 0',
+                    letterSpacing: '-1px'
+                }}>
                     Cardiovascular Disease Bayesian Network
                 </h1>
-                <p style={{ color: '#7f8c8d', fontSize: '1.2rem', margin: '0', fontWeight: '400' }}>
-                    This graph visualizes the probabilistic dependencies between risk factors.
+                <p style={{ color: '#7f8c8d', fontSize: '1.15rem', maxWidth: '800px', margin: '0 auto', lineHeight: '1.6' }}>
+                    Explore the probabilistic dependencies between cardiovascular risk factors. Compare our static dataset baseline against the dynamic, interactive model below.
                 </p>
             </div>
-            {/* ----------------------------- */}
 
-            {/* --- NEW STATIC IMAGE PANEL --- */}
-            {/* We place the image here as an immediate visual "anchor" for the network concept */}
-            <div style={{ textAlign: 'center', marginBottom: '40px', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '10px', backgroundColor: '#f8f9fa', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
-                <p style={{fontSize: '0.85rem', color: '#7f8c8d', margin: '0 0 10px 0', textTransform: 'uppercase', letterSpacing: '1px'}}>Static Network View (Preview)</p>
-                <img
-                    src={ReactFlowPlaceholder}
-                    alt="Bayesian Network DAG Structure"
-                    style={{ maxWidth: '100%', height: 'auto', borderRadius: '8px', border: '1px solid #eee' }}
-                />
-            </div>
-
-
-            {/* 1. The Dynamic Graph Visualization */}
-            {/* THIS IS THE COMPONENT WE NEED TO UPGRADE NEXT */}
-
-
-            <hr style={{ margin: '50px 0', border: '0', borderTop: '1px solid #e2e8f0' }} />
-
-            {/* 2. The Interactive Calculator */}
             <div style={{ textAlign: 'center', marginBottom: '30px' }}>
                 <h2 style={{ color: '#2c3e50', fontSize: '2rem', margin: '0 0 10px 0' }}>Interactive Risk Calculator</h2>
                 <p style={{ color: '#7f8c8d', fontSize: '1.05rem', margin: '0' }}>
@@ -45,10 +30,11 @@ function App() {
                 </p>
             </div>
 
-            <div className="alert-info text-sm mt-4 p-4 border rounded-lg bg-blue-50 text-blue-800 shadow-sm mb-6 text-center">
+            <div style={{ padding: '15px', border: '1px solid #bce8f1', borderRadius: '8px', backgroundColor: '#d9edf7', color: '#31708f', marginBottom: '25px', textAlign: 'center', fontSize: '0.9rem' }}>
                 <strong>Note:</strong> This Bayesian Network is trained on a limited educational dataset (~300 records). Highly specific or unusual combinations of symptoms may result in mathematically paradoxical risk scores due to data sparsity.
             </div>
 
+            {/* THE ENTIRE UI (Graphs + Form) IS NOW INSIDE HERE */}
             <RiskCalculator />
 
             <hr style={{ margin: '50px 0', border: '0', borderTop: '1px solid #e2e8f0' }} />

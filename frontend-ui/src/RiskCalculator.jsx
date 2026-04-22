@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import VerificationPanel from './VerificationPanel';
 import BayesianNetwork from './BayesianNetwork';
+import ReactFlowPlaceholder from './graph_static.png'; // Make sure this matches your filename!
 
 
 const RiskCalculator = () => {
@@ -129,19 +130,73 @@ const RiskCalculator = () => {
     return (
         <div style={styles.container}>
 
-            <div style={{ marginBottom: '30px' }}>
-                <BayesianNetwork
-                    evidence={evidence}
-                    finalRisk={bayesResult ? bayesResult.disease_probability : null}
-                />
+            {/* --- REPLACED SINGLE GRAPH WITH SIDE-BY-SIDE SHOWCASE --- */}
+            <div style={{
+                display: 'flex',
+                flexDirection: 'row',
+                gap: '30px',
+                marginBottom: '40px',
+                alignItems: 'stretch' // Forces both boxes to be the exact same height
+            }}>
+
+                {/* LEFT COLUMN: Static Reference Image */}
+                <div style={{
+                    flex: '1', // Takes up 50% of the space
+                    backgroundColor: '#fff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '12px',
+                    padding: '20px',
+                    boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                    display: 'flex',
+                    flexDirection: 'column'
+                }}>
+                    <div style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', marginBottom: '15px' }}>
+                        <h3 style={{ color: '#2c3e50', margin: '0', fontSize: '1.2rem' }}>Static Dataset Baseline</h3>
+                        <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>Original DAG Layout (Dagre)</span>
+                    </div>
+
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8f9fa', borderRadius: '8px', overflow: 'hidden' }}>
+                        <img
+                            src={ReactFlowPlaceholder}
+                            alt="Static Bayesian Network"
+                            style={{ maxWidth: '100%', maxHeight: '600px', objectFit: 'contain' }}
+                        />
+                    </div>
+                </div>
+
+                {/* RIGHT COLUMN: Dynamic React Flow Graph */}
+                <div style={{
+                    flex: '1', // Takes up the other 50% of the space
+                    backgroundColor: '#fff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '12px',
+                    padding: '20px',
+                    boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                    display: 'flex',
+                    flexDirection: 'column'
+                }}>
+                    <div style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', marginBottom: '15px' }}>
+                        <h3 style={{ color: '#3498db', margin: '0', fontSize: '1.2rem' }}>Interactive Engine</h3>
+                        <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>Real-time probability updates</span>
+                    </div>
+
+                    <div style={{ flex: 1, position: 'relative' }}>
+
+                        {/* THIS IS YOUR DYNAMIC GRAPH */}
+                        <BayesianNetwork
+                            evidence={evidence}
+                            finalRisk={bayesResult ? bayesResult.disease_probability : null}
+                        />
+
+                    </div>
+                </div>
+
             </div>
+            {/* --- END SIDE-BY-SIDE SHOWCASE --- */}
 
+
+            {/* --- THE REST OF YOUR APP REMAINS UNCHANGED BELOW --- */}
             <div style={styles.topRow}>
-
-
-
-
-
 
                 {/* --- COLUMN 1: INPUT FORM --- */}
                 <div style={styles.inputPanel}>
@@ -306,9 +361,6 @@ const RiskCalculator = () => {
                     )}
                 </div>
 
-
-
-
             </div>
 
             {/* --- NEW ROW: RISK FACTOR BREAKDOWN --- */}
@@ -337,8 +389,8 @@ const RiskCalculator = () => {
                                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
                                         <span><strong>{cleanFeatureName}:</strong> {factor.value}</span>
                                         <span style={{ fontWeight: 'bold', color: barColor }}>
-                                            {factor.impact_percentage > 0 ? '+' : ''}{factor.impact_percentage.toFixed(1)}%
-                                        </span>
+                                        {factor.impact_percentage > 0 ? '+' : ''}{factor.impact_percentage.toFixed(1)}%
+                                    </span>
                                     </div>
                                     <div style={{ width: '100%', backgroundColor: '#ecf0f1', borderRadius: '10px', height: '8px', overflow: 'hidden' }}>
                                         <div style={{ width: `${barWidth}%`, backgroundColor: barColor, height: '100%', borderRadius: '10px', transition: 'width 0.5s' }}></div>
@@ -352,7 +404,7 @@ const RiskCalculator = () => {
             {/* --- END RISK FACTOR BREAKDOWN --- */}
 
 
-            {/* --- NEW ROW: INTERACTIVE AI CHAT (ADDED RIGHT BELOW) --- */}
+            {/* --- NEW ROW: INTERACTIVE AI CHAT --- */}
             {bayesResult && (
                 <div style={styles.chatContainer}>
                     <div style={styles.chatHeader}>
@@ -403,9 +455,6 @@ const RiskCalculator = () => {
                 </div>
             )}
             {/* --- END CHAT --- */}
-
-
-
 
             <VerificationPanel evidence={evidence} isAnalyzed={true} />
 
