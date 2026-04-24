@@ -286,8 +286,9 @@ def ask_ai_general(request: PredictionRequest):
         prompt += "\nRULES:\n"
         prompt += "1. Give a clinical assessment of the likelihood that this patient CURRENTLY has coronary artery disease (CAD), based on standard diagnostic criteria.\n"
         prompt += "2. Provide a specific estimated PERCENTAGE representing the probability based on standard medical literature.\n"
-        prompt += f"3. CONTRADICTION FLAG: The underlying mathematical Bayesian Network calculated this patient's risk as {bn_percentage:.1f}%. If your independent clinical estimate differs significantly from this mathematical calculation, you MUST start your response with '**⚠️ Clinical Contradiction Flagged:**' and briefly explain that the mathematical model is likely skewed by sparse data on this highly specific combination of symptoms.\n"
-        prompt += "4. FORMAT: Keep it professional, concise, and under 4 sentences.\n"
+        prompt += f"3. CONTRADICTION FLAG: The underlying mathematical Bayesian Network calculated this patient's risk as {bn_percentage:.1f}%. If your independent clinical estimate differs significantly from this mathematical calculation, you MUST start your response with '**⚠️ Clinical Contradiction Flagged:**' and briefly explain that why the mathematical BN differs from your personal AI CAD percentage.\n"
+        prompt += "4. Estimate the percentage of liklihood that the patient has CAD highlighting the contributing factors that influenced you to come to this conclusion. \n"
+        prompt += "5. FORMAT: Keep it professional, concise, and under 4 sentences.\n"
 
         response = client.models.generate_content(
             model = "gemini-2.5-flash",
