@@ -51,6 +51,7 @@ def startup_event():
         print(f"Failed to start model: {e}")
 
 class PredictionRequest(BaseModel):
+    patient_name: Optional[str] = None
     evidence: Dict[str, str]
     treatments: Optional[Dict[str, str]] = None
 
@@ -114,6 +115,11 @@ def predict_heart_disease(request: PredictionRequest):
         if t.get('pci') == 'Yes': final_probability *= 0.80
 
     feature_breakdown = bayesian_service.calculate_feature_impacts(request.evidence)
+
+    if request.patient_name:
+        print(f"Saving patient {request.patient_name} to database...")
+        # Example: db.execute("INSERT INTO patients (name, risk_score, data) VALUES (?, ?, ?)",
+        # (request.patient_name, final_probability, str(request.evidence)))
 
     return {
         "base_probability": float(base_probability),
