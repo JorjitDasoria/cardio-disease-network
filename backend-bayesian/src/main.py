@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from typing import Dict, Optional, Any, List
 from dotenv import load_dotenv
 from src.model_logic import CardioBayesianModel
-
+import json
+import sqlite3
 
 # 1. Load API Key
 load_dotenv()
@@ -42,6 +43,31 @@ class ChatRequest(BaseModel):
 
 # 2. The Interactive Chat Endpoint
 from google.genai import types
+
+
+def init_db():
+    conn = sqlite3.connect('patient_records.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+                   CREATE TABLE IF NOT EXISTS records (
+                                                          id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                          patient_name TEXT,
+                                                          bn_score REAL,
+                                                          ai_score INTEGER,
+                                                          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                   )
+                   ''')
+    conn.commit()
+    conn.close()
+
+init_db() # Run this once when the server boots
+# ----------------------
+
+# We also need a new Pydantic model for saving data
+class SaveRecordRequest(BaseModel):
+    patient_name: str
+    bn_score: float
+    ai_score: int
 
 @app.on_event("startup")
 def startup_event():
@@ -277,9 +303,8 @@ def chat_ai_doctor(request: ChatRequest):
 
 @app.post("/ask-ai-general")
 def ask_ai_general(request: PredictionRequest):
-    """An independent AI that only sees patient attributes, not the BN math."""
+    """An independent AI that acts as a clinical reviewer to the BN math."""
     try:
-        # Calculate the Bayesian Network's score so the AI can audit it
         base_probability = bayesian_service.predict_risk(request.evidence)
         final_probability = float(base_probability)
 
@@ -293,35 +318,88 @@ def ask_ai_general(request: PredictionRequest):
 
         bn_percentage = final_probability * 100
 
-        # Build the prompt
         prompt = (
-            "You are an independent AI medical assistant evaluating cardiovascular risk. "
-            "Analyze the following patient profile and provide a general clinical assessment based entirely on standard medical literature.\n\n"
-            "Patient Profile:\n"
+            "You are an AI medical assistant evaluating cardiovascular risk. "
+            "Review the following patient profile.\n\n"
         )
-
         for key, value in request.evidence.items():
             prompt += f"- {key}: {value}\n"
-
         if request.treatments:
             prompt += "Treatments:\n"
             for key, value in request.treatments.items():
                 prompt += f"- {key}: {value}\n"
 
-        # REFINED RULES: Consolidate the percentage requests and explain the dataset flaw
         prompt += "\nRULES:\n"
-        prompt += "1. INDEPENDENT ESTIMATE: Provide a specific estimated PERCENTAGE representing the likelihood that this patient CURRENTLY has coronary artery disease (CAD). Briefly highlight the top 1-2 clinical factors driving this specific estimate.\n"
-        prompt += f"2. CONTRADICTION FLAG: The separate mathematical Bayesian Network calculated this patient's risk as {bn_percentage:.1f}%. If your independent clinical estimate differs significantly from this mathematical calculation, you MUST start your response exactly with '**⚠️ Clinical Contradiction Flagged:**'.\n"
-        prompt += "3. EXPLAINING THE DIFFERENCE: If you flagged a contradiction, briefly explain that the mathematical BN is a Naive Bayes model trained on a small, isolated dataset (~300 records). State that the BN's result is likely reflecting statistical selection biases or data sparsity rather than standard biological causality.\n"
-        prompt += "4. FORMAT: Keep it highly professional, strictly concise, and under 4 sentences total.\n"
+        prompt += f"1. BASELINE ANCHOR: The Bayesian Network calculated a {bn_percentage:.1f}% risk. Use this as your starting baseline.\n"
+        prompt += "2. CLINICAL ADJUSTMENT: Apply your medical knowledge to adjust this baseline. If the BN is skewed by dataset artifacts (like 'Asymptomatic' raising risk), adjust the score down. Try to keep your adjusted score reasonably correlated with the BN (within 10-20%) unless there is a massive clinical contradiction.\n"
+        prompt += "3. JSON FORMAT: You MUST return your answer as a raw JSON object with exactly two keys:\n"
+        prompt += "   - 'ai_percentage': An integer representing your final adjusted risk score (e.g., 25).\n"
+        prompt += "   - 'explanation': A 3-sentence explanation of why you adjusted it up or down compared to the math. You MUST explicitly state your final estimated percentage within this text.\n"
+        prompt += "Do not wrap the JSON in markdown blocks.\n"
 
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
         )
 
-        return {"ai_response": response.text}
+        # Safely parse the JSON response
+        raw_text = response.text.strip()
+        if raw_text.startswith("```json"):
+            raw_text = raw_text[7:-3].strip()
+        elif raw_text.startswith("```"):
+            raw_text = raw_text[3:-3].strip()
+
+        ai_data = json.loads(raw_text)
+
+        return {
+            "ai_response": ai_data.get("explanation", "Could not generate explanation."),
+            "ai_percentage": ai_data.get("ai_percentage", int(bn_percentage))
+        }
 
     except Exception as e:
         print(f"General AI API Error: {e}")
-        return {"ai_response": f"**[AI UNAVAILABLE - Error: {str(e)}]**"}
+        return {"ai_response": f"**[AI UNAVAILABLE]**", "ai_percentage": 0}
+
+
+@app.post("/save-record")
+def save_record(request: SaveRecordRequest):
+    try:
+        conn = sqlite3.connect('patient_records.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO records (patient_name, bn_score, ai_score) VALUES (?, ?, ?)",
+            (request.patient_name, request.bn_score, request.ai_score)
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "Record saved to database."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/global-stats")
+def get_global_stats():
+    try:
+        conn = sqlite3.connect('patient_records.db')
+        cursor = conn.cursor()
+        # NEW: We are now grabbing the patient's name too, so we can show it on the graph!
+        cursor.execute("SELECT bn_score, ai_score, patient_name FROM records")
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            return {"total_records": 0, "avg_bn": 0, "avg_ai": 0, "data_points": []}
+
+        avg_bn = sum(row[0] for row in rows) / len(rows)
+        avg_ai = sum(row[1] for row in rows) / len(rows)
+
+        # NEW: Format all historical patients into a list for the scatter plot
+        data_points = [{"name": row[2], "bn": round(row[0], 1), "ai": row[1]} for row in rows]
+
+        return {
+            "total_records": len(rows),
+            "avg_bn": round(avg_bn, 1),
+            "avg_ai": round(avg_ai, 1),
+            "data_points": data_points # Send the list to React
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

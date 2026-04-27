@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import VerificationPanel from './VerificationPanel';
 import BayesianNetwork from './BayesianNetwork';
-import ReactFlowPlaceholder from './graph_static.png'; // Make sure this matches your filename!
+import ReactFlowPlaceholder from './graph_static.png';
+import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
@@ -17,6 +18,8 @@ const RiskCalculator = () => {
     const [bayesResult, setBayesResult] = useState(null);
     const [aiResult, setAiResult] = useState(null); // <-- ADD THIS LINE BACK!
     const [generalAiResult, setGeneralAiResult] = useState(null);
+    const [generalAiPercentage, setGeneralAiPercentage] = useState(null);
+    const [globalStats, setGlobalStats] = useState({ total_records: 0, avg_bn: 0, avg_ai: 0 });
 
 
     const [chatHistory, setChatHistory] = useState([]);
@@ -45,36 +48,51 @@ const RiskCalculator = () => {
     const calculateRisk = async () => {
         setLoading(true);
         setError(null);
-
-        // 1. Clear all previous states so the UI resets
-        setBayesResult(null);
-        setAiResult(null);
-        setChatHistory([]);
         setGeneralAiResult(null);
+        setGeneralAiPercentage(null);
 
-        const payload = {patient_name: patientName, evidence, treatments };
+        // Include patient_name in the payload
+        const payload = {
+            patient_name: patientName,
+            evidence,
+            treatments
+        };
 
         try {
-            // STEP 1: Get the Math Model (This is fast, no LLM involved)
-            const bayesRes = await axios.post(`${process.env.REACT_APP_API_URL}/predict`, payload);
-            setBayesResult(bayesRes.data);
+            // STEP 1: Get the Mathematical Bayesian Network Result
+            const bnRes = await axios.post(`${process.env.REACT_APP_API_URL}/predict`, payload);
+            setBayesResult(bnRes.data);
 
-            // STEP 2: Ask the Aligned AI (WAIT for it to finish)
-            const aiRes = await axios.post(`${process.env.REACT_APP_API_URL}/ask-ai`, payload);
-            setAiResult(aiRes.data.ai_response || aiRes.data.reply);
-            setChatHistory([{ role: 'model', content: aiRes.data.ai_response }]);
+            // Extract the math score directly from the response
+            const currentBnScore = bnRes.data.disease_probability * 100;
 
-            await delay(2000);
-
-            // STEP 3: Ask the General AI (Only fires AFTER Step 2 is 100% done)
+            // STEP 2: Ask the General AI for its clinical opinion
             const generalRes = await axios.post(`${process.env.REACT_APP_API_URL}/ask-ai-general`, payload);
-            setGeneralAiResult(generalRes.data.ai_response || generalRes.data.reply);
+            setGeneralAiResult(generalRes.data.ai_response);
+            setGeneralAiPercentage(generalRes.data.ai_percentage);
+
+            // Extract the AI score directly from the response
+            const currentAiScore = generalRes.data.ai_percentage;
+
+            // STEP 3: Save the record to the SQLite database
+            if (patientName.trim() !== "") {
+                await axios.post(`${process.env.REACT_APP_API_URL}/save-record`, {
+                    patient_name: patientName,
+                    bn_score: currentBnScore,
+                    ai_score: currentAiScore
+                });
+            }
+
+            // STEP 4: Fetch the updated Global Database Averages to update the Correlation Graph
+            const statsRes = await axios.get(`${process.env.REACT_APP_API_URL}/global-stats`);
+            setGlobalStats(statsRes.data);
 
         } catch (err) {
-            console.error(err);
-            setError("Calculation failed. Check backend/API Key.");
+            console.error("Analysis Error:", err);
+            setError("Failed to calculate risk. Please check your connection.");
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const handleReset = () => {
@@ -196,11 +214,15 @@ const RiskCalculator = () => {
         },
         {
             question: "Does having blocked blood vessels mean someone 100% has cardiovascular disease?",
-            answer: "Clinically, significant blockage (narrowing of the artery by 50% or more) is specifically termed obstructive coronary artery disease (CAD). However, our mathematical model looks at how these blockages historically correlated with positive disease diagnoses within a specific clinical dataset, which introduces statistical nuances."
+            answer: "In medicine, yes—if an artery is narrowed by 50% or more, doctors officially call that coronary artery disease.\n" +
+                "\n" +
+                "However, our tool works a little differently. Instead of a strict \"yes\" or \"no,\" it looks at past medical records to see how often these blockages actually resulted in a doctor's diagnosis. Because it calculates probabilities based on real-world data, it shows the likelihood of having the disease rather than a 100% guarantee."
         },
         {
             question: "Why does the model sometimes show a low risk even with 2 or 3 blocked vessels?",
-            answer: "This is a known statistical artifact of the underlying training data (the classic UCI Heart Disease dataset). In this dataset, the \"Blocked Vessels\" feature refers to calcification seen via fluoroscopy. Occasionally, patients exhibited calcification in multiple vessels, but had developed \"collateral\" blood flow or lacked flow-limiting ischemia. Because they were not in immediate danger, their final diagnosis in the dataset was labeled as \"Negative.\" The Naive Bayes math blindly reflects these historical, edge-case medical decisions, which is why we provide an independent \"General AI Opinion\" to catch these data quirks!"
+            answer: "This happens because of a quirk in the historical medical records our tool learned from. In those old records, a \"blocked vessel\" just meant a scan showed some calcium buildup.\n" +
+                "\n" +
+                "Sometimes, patients had this buildup in multiple vessels but weren't actually in danger. Their bodies might have adapted by growing new \"detour\" blood vessels, or the buildup wasn't actually stopping blood flow. Because they were fine, doctors at the time recorded their diagnosis as \"negative\" for heart disease. Our math formula strictly follows that old data, which can lead to confusing results. That’s exactly why we included the \"General AI Opinion\" feature—to catch these weird historical quirks and give you a better explanation!"
         }
     ];
 
@@ -267,16 +289,16 @@ const RiskCalculator = () => {
                                 <option value="Borderline">Borderline (200 - 239 mg/dL)</option>
                                 <option value="High_Chol">High (≥ 240 mg/dL)</option>
                             </FormSelect>
-                            <FormSelect label="Max Heart Rate" name="HR_Bin" value={evidence.HR_Bin} onChange={handleEvidenceChange}>
-                                <option value="Low_Rate">Low (&lt; 110 bpm)</option>
-                                <option value="Normal_Rate">Normal (110 - 150 bpm)</option>
-                                <option value="High_Rate">High (&gt; 150 bpm)</option>
+                            <FormSelect label="Max Heart Rate (During Stress Test)" name="HR_Bin" value={evidence.HR_Bin} onChange={handleEvidenceChange}>
+                                <option value="Low_Rate">Low Peak (&lt; 110 bpm)</option>
+                                <option value="Normal_Rate">Sub-optimal Peak (110 - 150 bpm)</option>
+                                <option value="High_Rate">Healthy Peak (&gt; 150 bpm)</option>
                             </FormSelect>
                             <FormSelect label="Chest Pain Type" name="CP_Label" value={evidence.CP_Label} onChange={handleEvidenceChange}>
                                 <option value="Typical_Angina">Typical Angina</option>
                                 <option value="Atypical_Angina">Atypical Angina</option>
                                 <option value="Non_Anginal">Non-Anginal Pain</option>
-                                <option value="Asymptomatic">Asymptomatic</option>
+                                <option value="Asymptomatic">Asymptomatic (Silent Ischemia Risk)</option>
                             </FormSelect>
                             <FormSelect label="Fasting Blood Sugar" name="FBS_Label" value={evidence.FBS_Label} onChange={handleEvidenceChange}>
                                 <option value="Normal_Sugar">Normal (&lt; 120 mg/dL)</option>
@@ -376,54 +398,184 @@ const RiskCalculator = () => {
                 </div>
                 {/* --- END TOP ROW --- */}
 
-
-                {/* --- REARRANGED: GRAPHS ARE NOW IN THE MIDDLE --- */}
-                <div style={{ display: 'flex', flexDirection: 'row', gap: '30px', marginBottom: '40px', alignItems: 'stretch' }}>
-
-                    {/* LEFT COLUMN: Static Reference Image */}
-                    <div id="pdf-static-graph" style={{ flex: '1', backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column' }}>
+                {/* --- CORRELATION GRAPH --- */}
+                {bayesResult && generalAiPercentage !== null && (
+                    <div style={{ ...styles.resultPanel, marginBottom: '40px', backgroundColor: '#fdfefe', border: '1px solid #d5dbdb' }}>
                         <div style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', marginBottom: '15px' }}>
-                            <h3 style={{ color: '#2c3e50', margin: '0', fontSize: '1.2rem' }}>Static Dataset Baseline</h3>
-                            <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>Original DAG Layout (Dagre)</span>
-                            {/* --- NEW: BEGINNER EXPLANATION --- */}
-                            <p style={{ fontSize: '0.9rem', color: '#555', marginTop: '10px', lineHeight: '1.5', backgroundColor: '#f8f9fa', padding: '10px', borderRadius: '6px' }}>
-                                <strong>What is this?</strong> This diagram shows the "blueprint" of our AI. It reveals how factors like age, cholesterol, and chest pain mathematically connect to heart disease based on averages from hundreds of past patients.
-                            </p>
+                            <h3 style={{ color: '#2c3e50', margin: '0', fontSize: '1.2rem' }}>Model Consensus & Correlation</h3>
+                            <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>Comparing the deterministic math against the LLM's clinical literature review.</span>
                         </div>
-                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8f9fa', borderRadius: '8px', overflow: 'hidden' }}>
-                            <img src={ReactFlowPlaceholder} alt="Static Bayesian Network" style={{ maxWidth: '100%', maxHeight: '600px', objectFit: 'contain' }} />
-                        </div>
-                    </div>
 
-                    {/* RIGHT COLUMN: Dynamic React Flow Graph */}
-                    <div id="pdf-interactive-graph" style={{ flex: '1', backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ display: 'flex', flexDirection: 'row', gap: '40px' }}>
+
+                            {/* COLUMN 1: Current Patient */}
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                <h4 style={{ margin: 0, color: '#7f8c8d', fontSize: '0.9rem', textTransform: 'uppercase' }}>Current Patient: {patientName}</h4>
+                                <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                                        <span style={{ color: '#2ecc71' }}>Bayesian Network (Math)</span>
+                                        <span>{(bayesResult.disease_probability * 100).toFixed(1)}%</span>
+                                    </div>
+                                    <div style={{ width: '100%', backgroundColor: '#ecf0f1', borderRadius: '10px', height: '12px' }}>
+                                        <div style={{ width: `${bayesResult.disease_probability * 100}%`, backgroundColor: '#2ecc71', height: '100%', borderRadius: '10px', transition: 'width 1s ease-out' }}></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                                        <span style={{ color: '#2980b9' }}>General AI (Clinical Review)</span>
+                                        <span>{generalAiPercentage}%</span>
+                                    </div>
+                                    <div style={{ width: '100%', backgroundColor: '#ecf0f1', borderRadius: '10px', height: '12px' }}>
+                                        <div style={{ width: `${generalAiPercentage}%`, backgroundColor: '#2980b9', height: '100%', borderRadius: '10px', transition: 'width 1s ease-out' }}></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* COLUMN 2: Global Database Average */}
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px', borderLeft: '1px solid #eee', paddingLeft: '40px' }}>
+                                <h4 style={{ margin: 0, color: '#7f8c8d', fontSize: '0.9rem', textTransform: 'uppercase' }}>Global Database Average (n={globalStats.total_records})</h4>
+                                <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                                        <span style={{ color: '#27ae60', opacity: 0.7 }}>Avg. BN Math</span>
+                                        <span style={{ opacity: 0.7 }}>{globalStats.avg_bn}%</span>
+                                    </div>
+                                    <div style={{ width: '100%', backgroundColor: '#ecf0f1', borderRadius: '10px', height: '12px' }}>
+                                        <div style={{ width: `${globalStats.avg_bn}%`, backgroundColor: '#27ae60', opacity: 0.4, height: '100%', borderRadius: '10px', transition: 'width 1s ease-out' }}></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                                        <span style={{ color: '#2980b9', opacity: 0.7 }}>Avg. General AI</span>
+                                        <span style={{ opacity: 0.7 }}>{globalStats.avg_ai}%</span>
+                                    </div>
+                                    <div style={{ width: '100%', backgroundColor: '#ecf0f1', borderRadius: '10px', height: '12px' }}>
+                                        <div style={{ width: `${globalStats.avg_ai}%`, backgroundColor: '#2980b9', opacity: 0.4, height: '100%', borderRadius: '10px', transition: 'width 1s ease-out' }}></div>
+                                    </div>
+                                </div>
+                            </div>
+
+
+                        </div>
+                        {/* --- NEW: SCATTER PLOT CORRELATION GRAPH --- */}
+                        {globalStats.data_points && globalStats.data_points.length > 0 && (
+                            <div style={{ marginTop: '40px', paddingTop: '20px', borderTop: '1px dashed #d5dbdb' }}>
+                                <h4 style={{ margin: '0 0 5px 0', color: '#2c3e50', textAlign: 'center' }}>Global Patient Distribution (Math vs. AI)</h4>
+                                <p style={{ fontSize: '0.8rem', color: '#7f8c8d', textAlign: 'center', marginBottom: '20px' }}>
+                                    Dots below the diagonal line indicate the AI was more conservative than the raw math. Hover over a dot to see the patient.
+                                </p>
+
+                                <div style={{ width: '100%', height: '350px' }}>
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" opacity={0.5} />
+
+                                            {/* X Axis: The Math */}
+                                            <XAxis
+                                                type="number"
+                                                dataKey="bn"
+                                                name="Bayesian Network"
+                                                unit="%"
+                                                domain={[0, 100]}
+                                                label={{ value: "Bayesian Network Math Score (%)", position: "insideBottom", offset: -10 }}
+                                            />
+
+                                            {/* Y Axis: The AI */}
+                                            <YAxis
+                                                type="number"
+                                                dataKey="ai"
+                                                name="General AI"
+                                                unit="%"
+                                                domain={[0, 100]}
+                                                label={{ value: "General AI Score (%)", angle: -90, position: "insideLeft" }}
+                                            />
+
+                                            {/* The Tooltip (Shows patient name on hover!) */}
+                                            <Tooltip
+                                                cursor={{ strokeDasharray: '3 3' }}
+                                                content={({ active, payload }) => {
+                                                    if (active && payload && payload.length) {
+                                                        const data = payload[0].payload;
+                                                        return (
+                                                            <div style={{ backgroundColor: '#fff', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
+                                                                <p style={{ margin: 0, fontWeight: 'bold' }}>{data.name}</p>
+                                                                <p style={{ margin: 0, color: '#2ecc71' }}>Math: {data.bn}%</p>
+                                                                <p style={{ margin: 0, color: '#2980b9' }}>AI: {data.ai}%</p>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return null;
+                                                }}
+                                            />
+
+                                            {/* The Line of Perfect Agreement */}
+                                            <ReferenceLine
+                                                segment={[{ x: 0, y: 0 }, { x: 100, y: 100 }]}
+                                                stroke="#e74c3c"
+                                                strokeDasharray="3 3"
+                                                opacity={0.8}
+                                            />
+
+                                            {/* The Data Points */}
+                                            <Scatter name="Patients" data={globalStats.data_points} fill="#3498db" />
+                                        </ScatterChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                        )}
+                        {/* --- END SCATTER PLOT --- */}
+                    </div>
+                )}
+                {/* --- END CORRELATION GRAPH --- */}
+
+                {/* --- REARRANGED: GRAPHS ARE NOW STACKED VERTICALLY --- */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '40px', marginBottom: '40px' }}> {/* <-- Changed to column! */}
+
+                    {/* TOP GRAPH: Dynamic React Flow Graph */}
+                    <div id="pdf-interactive-graph" style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column' }}>
                         <div style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', marginBottom: '15px' }}>
                             <h3 style={{ color: '#3498db', margin: '0', fontSize: '1.2rem' }}>Interactive Engine</h3>
                             <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>Real-time probability updates</span>
-                            {/* --- NEW: BEGINNER EXPLANATION --- */}
                             <p style={{ fontSize: '0.9rem', color: '#555', marginTop: '10px', lineHeight: '1.5', backgroundColor: '#eaf2f8', padding: '10px', borderRadius: '6px' }}>
                                 <strong>How to use:</strong> When you select options in the "Patient Data" form above, this engine updates instantly. Watch the colored bars shift as the model calculates your specific patient's unique risk profile in real-time.
                             </p>
                         </div>
-                        <div style={{ flex: 1, position: 'relative' }}>
+                        <div style={{ width: '100%', minHeight: '600px', position: 'relative' }}>
                             <BayesianNetwork evidence={evidence} finalRisk={bayesResult ? bayesResult.disease_probability : null} />
                         </div>
                     </div>
+
+                    {/* BOTTOM GRAPH: Static Reference Image */}
+                    <div id="pdf-static-graph" style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ borderBottom: '2px solid #f1f5f9', paddingBottom: '10px', marginBottom: '15px' }}>
+                            <h3 style={{ color: '#2c3e50', margin: '0', fontSize: '1.2rem' }}>Static Dataset Baseline</h3>
+                            <span style={{ fontSize: '0.85rem', color: '#95a5a6' }}>Original DAG Layout (Dagre)</span>
+                            <p style={{ fontSize: '0.9rem', color: '#555', marginTop: '10px', lineHeight: '1.5', backgroundColor: '#f8f9fa', padding: '10px', borderRadius: '6px' }}>
+                                <strong>What is this?</strong> This diagram shows the "blueprint" of our AI. It reveals how factors like age, cholesterol, and chest pain mathematically connect to heart disease based on averages from hundreds of past patients.
+                            </p>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8f9fa', borderRadius: '8px', overflow: 'hidden', padding: '20px' }}>
+                            <img src={ReactFlowPlaceholder} alt="Static Bayesian Network" style={{ maxWidth: '100%', maxHeight: '600px', objectFit: 'contain' }} />
+                        </div>
+                    </div>
+
                 </div>
-                {/* --- END SIDE-BY-SIDE SHOWCASE --- */}
+                {/* --- END STACKED SHOWCASE --- */}
 
 
                 {/* --- RISK FACTOR BREAKDOWN --- */}
-                {/* ... (Your existing Risk Factor Breakdown code here, completely unchanged) ... */}
                 {bayesResult && bayesResult.factor_breakdown && bayesResult.factor_breakdown.length > 0 && (
                     <div id="pdf-risk-breakdown" style={styles.breakdownPanel}>
                         <h3 style={{ color: '#2c3e50', borderBottom: '1px solid #eee', paddingBottom: '10px', marginTop: 0 }}>
                             Risk Factor Breakdown
                         </h3>
-                        <p style={{ fontSize: '0.9rem', color: '#7f8c8d', marginBottom: '15px' }}>
-                            Here is exactly how your specific profile impacted the mathematical baseline:
-                        </p>
+
+                        {/* --- EXPLANATION FOR THE CLIENT --- */}
+                        <div style={{ fontSize: '0.9rem', color: '#34495e', marginBottom: '20px', backgroundColor: '#f4f6f7', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #2c3e50' }}>
+                            <strong>How the math works:</strong> This model uses Naive Bayes Log-Odds. It starts at an average baseline risk, and evaluates each of your patient's symptoms independently. Green bars indicate protective factors that pull your risk down mathematically, while red bars indicate dangerous factors that push your risk up based on the historical dataset frequencies.
+                        </div>
+
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+                            {/* --- THE RESTORED MAPPING CODE --- */}
                             {bayesResult.factor_breakdown.map((factor, index) => {
                                 const isDanger = factor.category === 'Danger';
                                 const isProtective = factor.category === 'Protective';
@@ -452,6 +604,7 @@ const RiskCalculator = () => {
                         </div>
                     </div>
                 )}
+                {/* --- END RISK FACTOR BREAKDOWN --- */}
 
             </div>
             {/* --- END OF REPORT WRAPPER --- */}
@@ -507,6 +660,10 @@ const RiskCalculator = () => {
                 </div>
             )}
 
+            {/* --- NEW: VERIFICATION EXPLANATION --- */}
+            <div style={{ marginTop: '40px', padding: '15px', backgroundColor: '#e8f8f5', borderRadius: '8px', border: '1px solid #d1f2eb', color: '#117a65' }}>
+                <strong>Clinical Verification Panel:</strong> The panel below stress-tests our mathematical model against known clinical scenarios. It injects "textbook" patient profiles into the algorithm to verify that the model correctly flags highly dangerous patients and clears healthy patients, proving its baseline accuracy.
+            </div>
             <VerificationPanel evidence={evidence} isAnalyzed={true} />
 
             {/* --- NEW ROW: FREQUENTLY ASKED QUESTIONS (ACCORDION) --- */}
