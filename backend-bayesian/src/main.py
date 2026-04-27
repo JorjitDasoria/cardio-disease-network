@@ -132,11 +132,14 @@ def predict_heart_disease(request: PredictionRequest):
 @app.post("/ask-ai")
 def ask_ai_doctor(request: PredictionRequest):
     try:
-        # 1. Calculate the base risk
+        # 1. Calculate the base risk AND the feature breakdown
         base_probability = bayesian_service.predict_risk(request.evidence)
         final_probability = float(base_probability)
 
-        # 2. NEW: Apply Treatment Reductions before feeding to AI
+        # NEW: Fetch the mathematical breakdown so the AI can see the "why"
+        feature_breakdown = bayesian_service.calculate_feature_impacts(request.evidence)
+
+        # 2. Apply Treatment Reductions before feeding to AI
         if request.treatments:
             t = request.treatments
             if t.get('statin') == 'High': final_probability *= 0.57
@@ -164,16 +167,33 @@ def ask_ai_doctor(request: PredictionRequest):
             for key, value in request.treatments.items():
                 prompt += f"- {key}: {value}\n"
 
-        # 5. The Client Requirement: Force Trend Alignment
-        prompt += f"\nCRITICAL INSTRUCTION:\n"
-        prompt += f"Our deterministic Bayesian Network has calculated this patient's final risk (after any selected treatments) to be exactly {bn_percentage:.1f}% ({risk_category} Risk).\n"
-        prompt += "RULES:\n"
-        prompt += "1. NO HALLUCINATING NUMBERS: Do not calculate or state your own risk percentages (e.g., do not reference ASCVD scores).\n"
-        prompt += f"2. TREND ALIGNMENT: Your analysis MUST completely align with the {bn_percentage:.1f}% risk figure. Make sure to explicitly mention how their selected treatments helped lower this score if treatments are present.\n"
-        prompt += "3. DATA SPARSITY EXPLANATION: If the mathematical risk seems clinically paradoxical (e.g., low risk despite severe factors, or high risk despite healthy factors), explicitly explain that this model is trained on a limited custom dataset (n=303). Explain that highly specific or rare combinations of factors may trigger 'sparse data' fallbacks in the math, leading to statistically accurate but clinically surprising probabilities within this specific dataset.\n"
-        prompt += "4. FORMAT: Keep it brief, professional, and under 3 sentences."
+        # 5. Feed the Naive Bayes mathematical breakdown directly to the AI
+        prompt += "\nMathematical Risk Factor Breakdown (Naive Bayes Weights):\n"
+        if feature_breakdown:
+            for factor in feature_breakdown:
+                sign = "+" if factor['impact_percentage'] > 0 else ""
+                prompt += f"- {factor['feature']} ({factor['value']}): {sign}{factor['impact_percentage']:.1f}% impact\n"
+        else:
+            prompt += "- No specific feature breakdown available.\n"
 
-        # 6. Call Gemini API
+        # --- NEW: HARDCODED DATASET CONTEXT ---
+        prompt += "\nDATASET CONTEXT:\n"
+        prompt += "For context, the Naive Bayes model was trained on the UCI Heart Disease dataset. "
+        prompt += "It contains exactly 303 patient records. The dataset heavily skews toward older patients, "
+        prompt += "and the presence of 'asymptomatic' chest pain in this specific dataset historically correlated heavily with confirmed disease via angiography. "
+        prompt += "Use this context to explain any mathematical quirks, such as normal/healthy inputs driving the risk score up.\n"
+        # --------------------------------------
+
+        # 6. RULES: Force the AI to explain the Naive Bayes logic
+        prompt += f"\nCRITICAL INSTRUCTION:\n"
+        prompt += f"Our Naive Bayes model calculated this patient's final risk to be exactly {bn_percentage:.1f}% ({risk_category} Risk).\n"
+        prompt += "RULES:\n"
+        prompt += "1. EXPLAIN THE MATH: Use the 'Mathematical Risk Factor Breakdown' provided above to explicitly explain *why* the model reached this conclusion. Name the top 1 or 2 specific features that drove the score up or down.\n"
+        prompt += "2. NAIVE BAYES CONTEXT: Briefly explain that this model uses Naive Bayes logic (weighing each factor independently based on a small 300-row dataset), which is why its mathematical output might differ from standard general clinical intuition. Use the 'DATASET CONTEXT' to explain why things like 'Asymptomatic' or 'Normal' heart rates might mathematically raise the risk.\n"
+        prompt += "3. TREND ALIGNMENT: Your analysis MUST completely align with the mathematical result. Do NOT calculate your own score. Mention how treatments helped lower the score if present.\n"
+        prompt += "4. FORMAT: Keep it professional, concise, and under 4 sentences."
+
+        # 7. Call Gemini API
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=prompt
@@ -259,7 +279,7 @@ def chat_ai_doctor(request: ChatRequest):
 def ask_ai_general(request: PredictionRequest):
     """An independent AI that only sees patient attributes, not the BN math."""
     try:
-        #Calculate the Bayesian Network's score so the AI can audit it
+        # Calculate the Bayesian Network's score so the AI can audit it
         base_probability = bayesian_service.predict_risk(request.evidence)
         final_probability = float(base_probability)
 
@@ -273,10 +293,10 @@ def ask_ai_general(request: PredictionRequest):
 
         bn_percentage = final_probability * 100
 
-        #Build the prompt
+        # Build the prompt
         prompt = (
-            "You are an AI medical assistant evaluating cardiovascular risk. "
-            "Analyze the following patient profile and provide a general clinical assessment.\n\n"
+            "You are an independent AI medical assistant evaluating cardiovascular risk. "
+            "Analyze the following patient profile and provide a general clinical assessment based entirely on standard medical literature.\n\n"
             "Patient Profile:\n"
         )
 
@@ -288,16 +308,15 @@ def ask_ai_general(request: PredictionRequest):
             for key, value in request.treatments.items():
                 prompt += f"- {key}: {value}\n"
 
-        #RULES: Force the comparison and the flag
+        # REFINED RULES: Consolidate the percentage requests and explain the dataset flaw
         prompt += "\nRULES:\n"
-        prompt += "1. Give a clinical assessment of the likelihood that this patient CURRENTLY has coronary artery disease (CAD), based on standard diagnostic criteria.\n"
-        prompt += "2. Provide a specific estimated PERCENTAGE representing the probability based on standard medical literature.\n"
-        prompt += f"3. CONTRADICTION FLAG: The underlying mathematical Bayesian Network calculated this patient's risk as {bn_percentage:.1f}%. If your independent clinical estimate differs significantly from this mathematical calculation, you MUST start your response with '**⚠️ Clinical Contradiction Flagged:**' and briefly explain that why the mathematical BN differs from your personal AI CAD percentage.\n"
-        prompt += "4. Estimate the percentage of liklihood that the patient has CAD highlighting the contributing factors that influenced you to come to this conclusion. \n"
-        prompt += "5. FORMAT: Keep it professional, concise, and under 4 sentences.\n"
+        prompt += "1. INDEPENDENT ESTIMATE: Provide a specific estimated PERCENTAGE representing the likelihood that this patient CURRENTLY has coronary artery disease (CAD). Briefly highlight the top 1-2 clinical factors driving this specific estimate.\n"
+        prompt += f"2. CONTRADICTION FLAG: The separate mathematical Bayesian Network calculated this patient's risk as {bn_percentage:.1f}%. If your independent clinical estimate differs significantly from this mathematical calculation, you MUST start your response exactly with '**⚠️ Clinical Contradiction Flagged:**'.\n"
+        prompt += "3. EXPLAINING THE DIFFERENCE: If you flagged a contradiction, briefly explain that the mathematical BN is a Naive Bayes model trained on a small, isolated dataset (~300 records). State that the BN's result is likely reflecting statistical selection biases or data sparsity rather than standard biological causality.\n"
+        prompt += "4. FORMAT: Keep it highly professional, strictly concise, and under 4 sentences total.\n"
 
         response = client.models.generate_content(
-            model = "gemini-2.5-flash",
+            model="gemini-2.5-flash",
             contents=prompt
         )
 
