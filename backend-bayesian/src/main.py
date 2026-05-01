@@ -330,11 +330,11 @@ def ask_ai_general(request: PredictionRequest):
                 prompt += f"- {key}: {value}\n"
 
         prompt += "\nRULES:\n"
-        prompt += f"1. BASELINE ANCHOR: The Bayesian Network calculated a {bn_percentage:.1f}% risk. Use this as your starting baseline.\n"
-        prompt += "2. CLINICAL ADJUSTMENT: Apply your medical knowledge to adjust this baseline. If the BN is skewed by dataset artifacts (like 'Asymptomatic' raising risk), adjust the score down. Try to keep your adjusted score reasonably correlated with the BN (within 10-20%) unless there is a massive clinical contradiction.\n"
+        prompt += "1. INDEPENDENT CLINICAL ASSESSMENT: Ignore the deterministic math model for your calculation. Rely purely on standard modern cardiovascular risk assessment intuition to evaluate this specific patient profile. Calculate your own independent risk percentage based on the clinical severity of these inputs.\n"
+        prompt += f"2. THE CONTRADICTION CHECK: For your awareness, the mathematical Bayesian Network calculated a {bn_percentage:.1f}% risk. If your independent clinical estimate differs significantly from this math, briefly explain *why* the mathematical model might be flawed in this specific case (e.g., statistical dataset quirks, over-penalizing age, or misinterpreting asymptomatic presentation).\n"
         prompt += "3. JSON FORMAT: You MUST return your answer as a raw JSON object with exactly two keys:\n"
-        prompt += "   - 'ai_percentage': An integer representing your final adjusted risk score (e.g., 25).\n"
-        prompt += "   - 'explanation': A 3-sentence explanation of why you adjusted it up or down compared to the math. You MUST explicitly state your final estimated percentage within this text.\n"
+        prompt += "   - 'ai_percentage': An integer representing your independent clinical risk score (e.g., 25).\n"
+        prompt += "   - 'explanation': A 3-sentence explanation of your clinical assessment. You MUST explicitly state your independent percentage within this text, and note how it compares to the mathematical model.\n"
         prompt += "Do not wrap the JSON in markdown blocks.\n"
 
         response = client.models.generate_content(

@@ -38,30 +38,43 @@ const VerificationPanel = ({ evidence, isAnalyzed }) => {
             ) : error ? (
                 <p style={{ color: '#e74c3c' }}>{error}</p>
             ) : metrics && metrics.clinical_metrics ? (
-                <div style={styles.grid}>
+                <>
+                    <div style={styles.grid}>
+                        {/* ACCURACY CARD */}
+                        <div style={styles.card}>
+                            <h4 style={styles.cardTitle}>Overall Accuracy</h4>
+                            <p style={styles.cardValue}>{metrics.clinical_metrics.accuracy}%</p>
+                            <p style={styles.cardDesc}>How often the model correctly diagnoses both healthy and sick patients.</p>
+                        </div>
 
-                    {/* ACCURACY CARD */}
-                    <div style={styles.card}>
-                        <h4 style={styles.cardTitle}>Overall Accuracy</h4>
-                        <p style={styles.cardValue}>{metrics.clinical_metrics.accuracy}%</p>
-                        <p style={styles.cardDesc}>How often the model correctly diagnoses both healthy and sick patients.</p>
+                        {/* SENSITIVITY CARD */}
+                        <div style={styles.card}>
+                            <h4 style={styles.cardTitle}>Sensitivity (True Positive)</h4>
+                            <p style={styles.cardValue}>{metrics.clinical_metrics.sensitivity}%</p>
+                            <p style={styles.cardDesc}>If a patient actually has heart disease, how likely the model is to catch it.</p>
+                        </div>
+
+                        {/* SPECIFICITY CARD */}
+                        <div style={styles.card}>
+                            <h4 style={styles.cardTitle}>Specificity (True Negative)</h4>
+                            <p style={styles.cardValue}>{metrics.clinical_metrics.specificity}%</p>
+                            <p style={styles.cardDesc}>If a patient is healthy, how good the model is at correctly clearing them.</p>
+                        </div>
                     </div>
 
-                    {/* SENSITIVITY CARD */}
-                    <div style={styles.card}>
-                        <h4 style={styles.cardTitle}>Sensitivity (True Positive)</h4>
-                        <p style={styles.cardValue}>{metrics.clinical_metrics.sensitivity}%</p>
-                        <p style={styles.cardDesc}>If a patient actually has heart disease, how likely the model is to catch it.</p>
+                    {/* NEW: UNDERSTANDING THE MATH SECTION */}
+                    <div style={styles.mathExplainer}>
+                        <h5 style={styles.mathTitle}>Understanding the Math (Confusion Matrix)</h5>
+                        <p style={styles.mathText}>
+                            These percentages are calculated using a <strong>Confusion Matrix</strong>. Our Python backend (utilizing standard data science libraries) evaluates the Naive Bayes math algorithm against hundreds of historical patient records where the true medical outcome is already known.
+                        </p>
+                        <ul style={styles.mathList}>
+                            <li><strong>Accuracy:</strong> <span style={styles.mathFormula}>(True Positives + True Negatives) ÷ Total Patients</span></li>
+                            <li><strong>Sensitivity:</strong> <span style={styles.mathFormula}>True Positives ÷ (True Positives + Missed Diagnoses)</span></li>
+                            <li><strong>Specificity:</strong> <span style={styles.mathFormula}>True Negatives ÷ (True Negatives + False Alarms)</span></li>
+                        </ul>
                     </div>
-
-                    {/* SPECIFICITY CARD */}
-                    <div style={styles.card}>
-                        <h4 style={styles.cardTitle}>Specificity (True Negative)</h4>
-                        <p style={styles.cardValue}>{metrics.clinical_metrics.specificity}%</p>
-                        <p style={styles.cardDesc}>If a patient is healthy, how good the model is at correctly clearing them.</p>
-                    </div>
-
-                </div>
+                </>
             ) : null}
 
             <div style={styles.footerNote}>
@@ -97,6 +110,43 @@ const styles = {
     cardTitle: { margin: '0 0 10px 0', fontSize: '1rem', color: '#34495e' },
     cardValue: { margin: '0', fontSize: '2rem', fontWeight: 'bold', color: '#2980b9' },
     cardDesc: { margin: '10px 0 0 0', fontSize: '0.8rem', color: '#7f8c8d', lineHeight: '1.4' },
+
+    // --- NEW STYLES FOR THE EXPLAINER ---
+    mathExplainer: {
+        marginTop: '25px',
+        padding: '15px',
+        backgroundColor: '#fdfefe',
+        border: '1px solid #d5dbdb',
+        borderRadius: '8px',
+        borderLeft: '4px solid #16a085'
+    },
+    mathTitle: {
+        margin: '0 0 8px 0',
+        color: '#16a085',
+        fontSize: '1rem'
+    },
+    mathText: {
+        margin: '0 0 12px 0',
+        fontSize: '0.9rem',
+        color: '#34495e',
+        lineHeight: '1.5'
+    },
+    mathList: {
+        margin: '0',
+        paddingLeft: '20px',
+        fontSize: '0.9rem',
+        color: '#2c3e50',
+        lineHeight: '1.6'
+    },
+    mathFormula: {
+        fontFamily: 'monospace',
+        backgroundColor: '#f4f6f7',
+        padding: '2px 6px',
+        borderRadius: '4px',
+        color: '#c0392b'
+    },
+    // ------------------------------------
+
     footerNote: {
         marginTop: '20px',
         padding: '10px',

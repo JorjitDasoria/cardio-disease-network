@@ -50,6 +50,7 @@ const RiskCalculator = () => {
         setError(null);
         setGeneralAiResult(null);
         setGeneralAiPercentage(null);
+        setAiResult(null);
 
         // Include patient_name in the payload
         const payload = {
@@ -63,10 +64,12 @@ const RiskCalculator = () => {
             const bnRes = await axios.post(`${process.env.REACT_APP_API_URL}/predict`, payload);
             setBayesResult(bnRes.data);
 
-            // Extract the math score directly from the response
+
             const currentBnScore = bnRes.data.disease_probability * 100;
 
-            // STEP 2: Ask the General AI for its clinical opinion
+            const alignedRes = await axios.post(`${process.env.REACT_APP_API_URL}/ask-ai`, payload);
+            setAiResult(alignedRes.data.ai_response);
+
             const generalRes = await axios.post(`${process.env.REACT_APP_API_URL}/ask-ai-general`, payload);
             setGeneralAiResult(generalRes.data.ai_response);
             setGeneralAiPercentage(generalRes.data.ai_percentage);
