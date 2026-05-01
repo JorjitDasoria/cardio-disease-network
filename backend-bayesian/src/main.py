@@ -376,6 +376,7 @@ def save_record(request: SaveRecordRequest):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+#hello
 @app.get("/global-stats")
 def get_global_stats():
     try:
