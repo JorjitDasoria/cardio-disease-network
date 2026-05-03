@@ -1,14 +1,14 @@
 import requests
-import json
 import time
 
 # Ensure your FastAPI server is running on this URL
-BASE_URL = "http://localhost:8000"
+BASE_URL = "https://cardio-disease-network.onrender.com"
 
 # Define a batch of hypothetical patient profiles to test
+# Names have been removed and replaced with 'patient_id'
 test_patients = [
     {
-        "name": "1. Perfect Health (Baseline)",
+        "patient_id": 1,
         "evidence": {
             "Age_Bin": "Young", "Sex_Label": "Female", "BP_Bin": "Normal",
             "Chol_Bin": "Desirable", "HR_Bin": "High_Rate", "CP_Label": "Non_Anginal",
@@ -17,7 +17,7 @@ test_patients = [
         "treatments": {"statin": "None", "bp_med": "None", "pci": "None"}
     },
     {
-        "name": "2. Classic High Risk (Untreated)",
+        "patient_id": 2,
         "evidence": {
             "Age_Bin": "Old", "Sex_Label": "Male", "BP_Bin": "High_BP",
             "Chol_Bin": "High_Chol", "HR_Bin": "Low_Rate", "CP_Label": "Typical_Angina",
@@ -26,7 +26,7 @@ test_patients = [
         "treatments": {"statin": "None", "bp_med": "None", "pci": "None"}
     },
     {
-        "name": "3. Classic High Risk (Aggressively Treated)",
+        "patient_id": 3,
         "evidence": {
             "Age_Bin": "Old", "Sex_Label": "Male", "BP_Bin": "High_BP",
             "Chol_Bin": "High_Chol", "HR_Bin": "Low_Rate", "CP_Label": "Typical_Angina",
@@ -35,7 +35,7 @@ test_patients = [
         "treatments": {"statin": "High", "bp_med": "Dual", "pci": "Yes"}
     },
     {
-        "name": "4. The Borderline Case",
+        "patient_id": 4,
         "evidence": {
             "Age_Bin": "Middle", "Sex_Label": "Male", "BP_Bin": "Elevated",
             "Chol_Bin": "Borderline", "HR_Bin": "Normal_Rate", "CP_Label": "Atypical_Angina",
@@ -44,7 +44,7 @@ test_patients = [
         "treatments": {"statin": "None", "bp_med": "None", "pci": "None"}
     },
     {
-        "name": "5. The Dataset Paradox (Asymptomatic)",
+        "patient_id": 5,
         "evidence": {
             "Age_Bin": "Young", "Sex_Label": "Male", "BP_Bin": "Normal",
             "Chol_Bin": "Desirable", "HR_Bin": "Normal_Rate", "CP_Label": "Asymptomatic",
@@ -53,7 +53,7 @@ test_patients = [
         "treatments": {"statin": "None", "bp_med": "None", "pci": "None"}
     },
     {
-        "name": "6. Hidden Danger (Normal Vitals, Bad Scan)",
+        "patient_id": 6,
         "evidence": {
             "Age_Bin": "Middle", "Sex_Label": "Female", "BP_Bin": "Normal",
             "Chol_Bin": "Desirable", "HR_Bin": "High_Rate", "CP_Label": "Non_Anginal",
@@ -62,7 +62,7 @@ test_patients = [
         "treatments": {"statin": "Moderate", "bp_med": "None", "pci": "None"}
     },
     {
-        "name": "7. The Paradox (Old, Bad Vitals, Clean Scan)",
+        "patient_id": 7,
         "evidence": {
             "Age_Bin": "Old", "Sex_Label": "Male", "BP_Bin": "High_BP",
             "Chol_Bin": "High_Chol", "HR_Bin": "Low_Rate", "CP_Label": "Asymptomatic",
@@ -71,7 +71,7 @@ test_patients = [
         "treatments": {"statin": "None", "bp_med": "None", "pci": "None"}
     },
     {
-        "name": "8. Young Female (Genetically High Chol)",
+        "patient_id": 8,
         "evidence": {
             "Age_Bin": "Young", "Sex_Label": "Female", "BP_Bin": "Normal",
             "Chol_Bin": "High_Chol", "HR_Bin": "High_Rate", "CP_Label": "Non_Anginal",
@@ -80,7 +80,7 @@ test_patients = [
         "treatments": {"statin": "Moderate", "bp_med": "None", "pci": "None"}
     },
     {
-        "name": "9. Middle-Aged Male (Previous Stent)",
+        "patient_id": 9,
         "evidence": {
             "Age_Bin": "Middle", "Sex_Label": "Male", "BP_Bin": "Normal",
             "Chol_Bin": "Desirable", "HR_Bin": "Normal_Rate", "CP_Label": "Atypical_Angina",
@@ -89,7 +89,7 @@ test_patients = [
         "treatments": {"statin": "High", "bp_med": "Monotherapy", "pci": "Yes"}
     },
     {
-        "name": "10. Silent Ischemia",
+        "patient_id": 10,
         "evidence": {
             "Age_Bin": "Old", "Sex_Label": "Female", "BP_Bin": "Elevated",
             "Chol_Bin": "Borderline", "HR_Bin": "Low_Rate", "CP_Label": "Asymptomatic",
@@ -98,7 +98,7 @@ test_patients = [
         "treatments": {"statin": "None", "bp_med": "None", "pci": "None"}
     },
     {
-        "name": "11. High Stress, Normal Vessels",
+        "patient_id": 11,
         "evidence": {
             "Age_Bin": "Middle", "Sex_Label": "Male", "BP_Bin": "High_BP",
             "Chol_Bin": "Borderline", "HR_Bin": "High_Rate", "CP_Label": "Typical_Angina",
@@ -108,8 +108,9 @@ test_patients = [
     }
 ]
 
-print(f"{'Patient Profile':<40} | {'Math (BN) %':<15} | {'AI %':<10} | {'Difference'}")
-print("-" * 85)
+# Updated print headers for formatting
+print(f"{'Patient ID':<15} | {'Math (BN) %':<15} | {'AI %':<10} | {'Difference'}")
+print("-" * 65)
 
 for patient in test_patients:
     payload = {
@@ -131,23 +132,23 @@ for patient in test_patients:
         # Calculate the disparity
         diff = abs(math_score - ai_score)
 
-
-        #save to database
+        # 3. Save to database
+        # Mapping the ID to a string to fulfill the 'patient_name' payload requirement
         save_payload = {
-            "patient_name": patient["name"],
+            "patient_name": f"Patient_{patient['patient_id']}",
             "bn_score": math_score,
             "ai_score": ai_score
         }
         requests.post(f"{BASE_URL}/save-record", json=save_payload)
 
         # Print the row
-        print(f"{patient['name']:<40} | {math_score:>14.1f}% | {ai_score:>9}% | {diff:>8.1f}%")
+        print(f"Patient {patient['patient_id']:<7} | {math_score:>14.1f}% | {ai_score:>9}% | {diff:>8.1f}%")
 
         # Small delay to prevent hitting free-tier API rate limits
         time.sleep(2)
 
     except Exception as e:
-        print(f"Failed to process {patient['name']}: {e}")
+        print(f"Failed to process Patient {patient['patient_id']}: {e}")
 
-print("-" * 85)
+print("-" * 65)
 print("Testing Complete. You can copy this data into Excel or a CSV for the client.")
