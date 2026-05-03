@@ -8,7 +8,37 @@ from dotenv import load_dotenv
 from src.model_logic import CardioBayesianModel
 import json
 import sqlite3
+import psycopg2
 
+DB_URL = os.getenv("DATABASE_URL")
+
+def get_db_connection():
+    return psycopg2.connect(DB_URL)
+
+def init_db():
+    if not DB_URL:
+        print("Warning: No DATABASE_URL found.")
+        return
+
+    # --- ALL OF THIS MUST BE INDENTED INSIDE THE FUNCTION ---
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # Note: Postgres uses SERIAL instead of AUTOINCREMENT
+    cursor.execute('''
+                   CREATE TABLE IF NOT EXISTS records (
+                                                          id SERIAL PRIMARY KEY,
+                                                          patient_name TEXT,
+                                                          bn_score REAL,
+                                                          ai_score INTEGER,
+                                                          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )
+                   ''')
+    conn.commit()
+    conn.close()
+    # --------------------------------------------------------
+
+# Run this once when the server boots
+init_db()
 # 1. Load API Key
 load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
@@ -45,22 +75,8 @@ class ChatRequest(BaseModel):
 from google.genai import types
 
 
-def init_db():
-    conn = sqlite3.connect('patient_records.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS records (
-                                                          id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                                          patient_name TEXT,
-                                                          bn_score REAL,
-                                                          ai_score INTEGER,
-                                                          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                   )
-                   ''')
-    conn.commit()
-    conn.close()
 
-init_db() # Run this once when the server boots
+
 # ----------------------
 
 # We also need a new Pydantic model for saving data
@@ -207,7 +223,7 @@ def ask_ai_doctor(request: PredictionRequest):
         prompt += "For context, the Naive Bayes model was trained on the UCI Heart Disease dataset. "
         prompt += "It contains exactly 303 patient records. The dataset heavily skews toward older patients, "
         prompt += "and the presence of 'asymptomatic' chest pain in this specific dataset historically correlated heavily with confirmed disease via angiography. "
-        prompt += "Use this context to explain any mathematical quirks, such as normal/healthy inputs driving the risk score up.\n"
+        prompt += "Use this context to explain any mathematical quirks. CRITICAL: The raw dataset label 'Normal_Rate' for heart rate actually means a 'Sub-optimal Peak' during a stress test. You MUST refer to it as a 'Sub-optimal Peak', not a normal heart rate, to avoid confusing the patient.\n"
         # --------------------------------------
 
         # 6. RULES: Force the AI to explain the Naive Bayes logic
@@ -335,6 +351,7 @@ def ask_ai_general(request: PredictionRequest):
         prompt += "3. JSON FORMAT: You MUST return your answer as a raw JSON object with exactly two keys:\n"
         prompt += "   - 'ai_percentage': An integer representing your independent clinical risk score (e.g., 25).\n"
         prompt += "   - 'explanation': A 3-sentence explanation of your clinical assessment. You MUST explicitly state your independent percentage within this text, and note how it compares to the mathematical model.\n"
+
         prompt += "Do not wrap the JSON in markdown blocks.\n"
 
         response = client.models.generate_content(
@@ -364,10 +381,11 @@ def ask_ai_general(request: PredictionRequest):
 @app.post("/save-record")
 def save_record(request: SaveRecordRequest):
     try:
-        conn = sqlite3.connect('patient_records.db')
+        conn = get_db_connection()
         cursor = conn.cursor()
+        # Note: Postgres uses %s instead of ?
         cursor.execute(
-            "INSERT INTO records (patient_name, bn_score, ai_score) VALUES (?, ?, ?)",
+            "INSERT INTO records (patient_name, bn_score, ai_score) VALUES (%s, %s, %s)",
             (request.patient_name, request.bn_score, request.ai_score)
         )
         conn.commit()
@@ -380,9 +398,8 @@ def save_record(request: SaveRecordRequest):
 @app.get("/global-stats")
 def get_global_stats():
     try:
-        conn = sqlite3.connect('patient_records.db')
+        conn = get_db_connection()
         cursor = conn.cursor()
-        # NEW: We are now grabbing the patient's name too, so we can show it on the graph!
         cursor.execute("SELECT bn_score, ai_score, patient_name FROM records")
         rows = cursor.fetchall()
         conn.close()
@@ -393,14 +410,14 @@ def get_global_stats():
         avg_bn = sum(row[0] for row in rows) / len(rows)
         avg_ai = sum(row[1] for row in rows) / len(rows)
 
-        # NEW: Format all historical patients into a list for the scatter plot
+        # Format all historical patients into a list for the scatter plot
         data_points = [{"name": row[2], "bn": round(row[0], 1), "ai": row[1]} for row in rows]
 
         return {
             "total_records": len(rows),
             "avg_bn": round(avg_bn, 1),
             "avg_ai": round(avg_ai, 1),
-            "data_points": data_points # Send the list to React
+            "data_points": data_points
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}

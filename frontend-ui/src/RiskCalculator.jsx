@@ -590,10 +590,26 @@ const RiskCalculator = () => {
                                 const cleanFeatureName = factor.feature.replace('_Label', '').replace('_Bin', '');
                                 const barColor = isDanger ? '#e74c3c' : isProtective ? '#2ecc71' : '#95a5a6';
 
+                                let displayValue = factor.value;
+                                if (factor.feature === 'HR_Bin') {
+                                    if (factor.value === 'Normal_Rate') displayValue = 'Sub-optimal Peak';
+                                    if (factor.value === 'High_Rate') displayValue = 'Healthy Peak';
+                                    if (factor.value === 'Low_Rate') displayValue = 'Low Peak';
+                                }
+                                if (factor.feature === 'CP_Label' && factor.value === 'Asymptomatic') {
+                                    displayValue = 'Asymptomatic (Silent Risk)';
+                                }
+
                                 return (
                                     <div key={index} style={{ display: 'flex', flexDirection: 'column' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                                            <span><strong>{cleanFeatureName}:</strong> {factor.value}</span>
+                                            <span><strong>{cleanFeatureName}:</strong> {
+                                                factor.value === 'Normal_Rate' ? 'Sub-optimal Peak' :
+                                                    factor.value === 'High_Rate' ? 'Healthy Peak' :
+                                                        factor.value === 'Asymptomatic' ? 'Asymptomatic (Silent Risk)' :
+                                                            factor.value
+                                            }
+                                            </span>
                                             <span style={{ fontWeight: 'bold', color: barColor }}>
                                             {factor.impact_percentage > 0 ? '+' : ''}{factor.impact_percentage.toFixed(1)}%
                                         </span>
