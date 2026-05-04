@@ -131,28 +131,10 @@ Change `REACT_APP_API_URL` if the backend is hosted elsewhere (e.g. behind a rev
 
 ---
 
-## 6. Three Ways to Run the Application
+## 6. Two Ways to Run the Application
 
-### 6.1 Option A — Docker Compose (recommended)
 
-From the repository root:
-
-```bash
-docker compose up --build
-```
-
-This builds both images and starts:
-
-- `cardio_backend` on `http://localhost:8000`
-- `cardio_frontend` on `http://localhost:3000`
-
-The compose file mounts the source directories as volumes, so code changes hot-reload in both services. To stop:
-
-```bash
-docker compose down
-```
-
-### 6.2 Option B — Two manual terminals
+### 6.2 Option A — Two manual terminals
 
 **Terminal 1 — backend:**
 
@@ -172,7 +154,7 @@ npm start
 
 The React dev server opens `http://localhost:3000` automatically and proxies API calls to `REACT_APP_API_URL`.
 
-### 6.3 Option C — IntelliJ Run Configurations
+### 6.3 Option B — IntelliJ Run Configurations
 
 Create two run configurations under **Run → Edit Configurations…**:
 
